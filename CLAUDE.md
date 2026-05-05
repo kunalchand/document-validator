@@ -72,15 +72,34 @@ document-validator/
 │
 ├── backend/                            # Python / FastAPI application
 │   ├── app/
-│   │   ├── api/                        # Route handlers (FastAPI routers)
-│   │   ├── agents/                     # LangGraph agents and nodes
-│   │   ├── parsers/                    # Input parsers (PDF, DOCX, text)
-│   │   ├── pipeline/                   # LangGraph graph definitions
-│   │   ├── utils/                      # Shared utilities
-│   │   └── constants/                  # App-wide constants
-│   ├── tests/                          # Backend tests
+│   │   ├── main.py                     # FastAPI app setup with middleware & handlers
+│   │   ├── config.py                   # Settings and configuration (pydantic)
+│   │   ├── core/
+│   │   │   ├── logger.py               # Structured logging utility
+│   │   │   ├── exceptions.py           # Custom exception classes
+│   │   │   └── __init__.py
+│   │   ├── api/                        # REST API layer (v1 routing)
+│   │   │   └── v1/
+│   │   │       ├── endpoints/
+│   │   │       │   ├── rules.py        # POST /extract-rules endpoint
+│   │   │       │   ├── audit.py        # POST /audit endpoint
+│   │   │       │   └── __init__.py
+│   │   │       ├── schemas.py          # Pydantic request/response models
+│   │   │       └── __init__.py
+│   │   ├── utils/
+│   │   │   ├── validators.py           # Input validation logic
+│   │   │   └── __init__.py
+│   │   ├── agents/                     # LangGraph agents and nodes (Phase 2)
+│   │   ├── parsers/                    # Document parsers (PDF, DOCX) (Phase 2)
+│   │   ├── pipeline/                   # LangGraph graph definitions (Phase 2)
+│   │   ├── constants/                  # App-wide constants
+│   │   └── __init__.py
+│   ├── tests/                          # Backend tests (coming soon)
+│   ├── main.py                         # Entry point for running server
 │   ├── .env.example                    # Environment variable template
-│   └── requirements.txt                # Python dependencies
+│   ├── .gitignore
+│   ├── requirements.txt                # Python dependencies
+│   └── README.md                       # Backend documentation
 │
 └── CLAUDE.md                           # This file
 ```
@@ -143,6 +162,91 @@ npm run build           # Production build
 
 Vite config includes proxy to `http://localhost:8000` for seamless API calls.
 
+## Backend Implementation Status
+
+### API Layer (Phase 1 - REST API)
+
+**Framework**: FastAPI with automatic Swagger/OpenAPI documentation
+
+**Key Features**:
+- Automatic interactive API documentation at `/docs` (Swagger UI) and `/redoc` (ReDoc)
+- CORS middleware for frontend integration
+- Structured error handling with custom exceptions
+- Environment-based configuration (development/production)
+- Structured logging throughout
+
+**Endpoints Implemented**:
+- `GET /` - Root health check
+- `GET /health` - Application health status
+- `POST /api/v1/extract-rules` - Extract rules from document (Phase 1)
+- `POST /api/v1/audit` - Audit document against rules (Phase 2 placeholder)
+
+**Request/Response Models** (Pydantic schemas):
+- `ExtractRulesResponse`: Returns extracted rules with metadata
+- `Rule`: Individual rule object (id, title, description, conditions, evidence, severity)
+- `AuditResponse`: Audit results per rule with compliance score
+- `ErrorResponse`: Standardized error format
+
+**Core Components**:
+
+1. **Configuration** (`config.py`):
+   - Pydantic BaseSettings for environment variables
+   - App settings: API keys, file limits, CORS origins
+   - LRU cache for singleton Settings instance
+
+2. **Core Utilities**:
+   - **logger.py**: Structured logging with configurable levels (DEBUG/INFO/WARNING/ERROR)
+   - **exceptions.py**: Custom exception hierarchy for domain-specific errors
+     - `InvalidInputException` (400)
+     - `FileParseFailed` (422)
+     - `ExtractionFailed` (500)
+     - `AuditFailed` (500)
+
+3. **Input Validation** (`utils/validators.py`):
+   - File upload validation (type, size)
+   - Text input validation (empty, length limits)
+   - Reusable validator functions
+
+4. **API Endpoints**:
+   - **rules.py**: `/extract-rules` endpoint
+     - Accepts file upload (PDF/DOCX) or text input
+     - Returns structured rules with conditions and evidence
+     - Placeholder for actual LangGraph agent integration
+   - **audit.py**: `/audit` endpoint
+     - Accepts document + rules JSON
+     - Returns audit results with compliance score
+     - Placeholder for RAG agent integration
+
+**Current Implementation**:
+- API layer fully functional with dummy data for testing
+- Proper error handling and validation in place
+- Ready for integration with agentic layer (LangGraph)
+- Vite proxy routes all `/api` calls to `http://localhost:8000`
+
+**Build & Run**:
+```bash
+cd backend
+pip install -r requirements.txt
+python main.py                    # Runs on http://localhost:8000
+```
+
+Access Swagger at `http://localhost:8000/docs`
+
+### Agentic Layer (Phase 2 - LangGraph)
+
+*Coming in next phase*
+
+The agentic layer will be built in:
+- `app/agents/` - LangGraph agents and nodes
+- `app/parsers/` - Document parsers (PDF, DOCX, text)
+- `app/pipeline/` - LangGraph graph definitions for rules extraction and audit
+
+This layer will handle:
+- Document parsing and normalization
+- LLM-powered rules extraction
+- Vector DB embedding and retrieval
+- RAG-based rule evaluation
+
 ## Key Design Decisions
 - Rules extraction is a deterministic structuring problem — no vector DB in Phase 1
 - Vector DB is used only for the user document in Phase 2
@@ -168,11 +272,24 @@ Vite config includes proxy to `http://localhost:8000` for seamless API calls.
 See `frontend/.env.example` and `backend/.env.example` for required variables.
 
 ## Next Steps
+
+### Backend (Priority)
+- Implement LangGraph agents for rules extraction pipeline
+- Implement document parsers for PDF and DOCX files
+- Set up vector database (Chroma / FAISS / Pinecone)
+- Implement RAG-based audit pipeline
+- Connect agentic layer to API endpoints
+
+### Frontend
 - Build Phase 2 frontend (Audit Document upload and results view)
-- Implement backend API for `/extract-rules` endpoint (Phase 1)
-- Implement backend API for `/audit` endpoint (Phase 2)
-- Connect frontend services to live backend
+- Connect frontend services to live backend (replace dummy data)
 - Add user feedback via toast notifications (Snackbar)
+- Add progress indicators for async operations
+
+### Integration
+- Test end-to-end flow between frontend and backend
+- Performance optimization and tuning
+- Comprehensive test coverage (unit, integration)
 
 ## Future Improvements
 - Persistent storage for extracted rules

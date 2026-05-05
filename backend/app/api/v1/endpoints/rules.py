@@ -1,136 +1,105 @@
+from typing import Annotated, Optional
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
-from datetime import datetime
+
 import uuid
 
 from app.config import Settings, get_settings
 from app.core import get_logger, InvalidInputException, FileParseFailed, ExtractionFailed
-from app.api.v1.schemas import ExtractRulesResponse, Rule, ErrorResponse
+from app.api.v1.schemas import ExtractRulesResponse, ErrorResponse
 from app.utils.validators import validate_file, validate_text
+from app.providers.factory import ProviderFactory
+from app.pipeline.phase1_graph import Phase1Pipeline
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/extract-rules", tags=["rules"])
 
 
-# TODO: Replace with actual rule extraction logic from agents
-def extract_rules_from_text(text: str) -> list[Rule]:
-    """
-    Placeholder for rule extraction logic.
-    Will be replaced with LangGraph agent pipeline.
-    """
-    dummy_rules = [
-        Rule(
-            id="rule_001",
-            title="Employee Background Check",
-            description="All employees must undergo a comprehensive background check before employment",
-            conditions=["Check must be completed within 30 days of offer"],
-            expected_evidence=["Background check report from accredited vendor"],
-            section="Section 2: Hiring Procedures",
-            severity="high",
-            status="extracted"
-        ),
-        Rule(
-            id="rule_002",
-            title="Data Confidentiality Agreement",
-            description="Every employee must sign a data confidentiality agreement upon joining",
-            conditions=["Agreement must be signed before first day of work"],
-            expected_evidence=["Signed confidentiality agreement"],
-            section="Section 3: Employment Agreements",
-            severity="high",
-            status="extracted"
-        )
-    ]
-    return dummy_rules
+def _get_pipeline(settings: Settings) -> Phase1Pipeline:
+    """Create a Phase1Pipeline from current settings"""
+    provider = ProviderFactory.create_llm_provider(
+        provider_type=settings.llm_provider,
+        api_key=settings.llm_api_key or "",
+        config={"model": settings.llm_model},
+    )
+    return Phase1Pipeline(llm_provider=provider)
 
 
 @router.post(
     "",
-    response_model=ExtractRulesResponse,
     responses={
         400: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
-        500: {"model": ErrorResponse}
-    }
+        500: {"model": ErrorResponse},
+    },
 )
 async def extract_rules(
-    file: UploadFile = File(None),
-    text: str = Form(None),
-    settings: Settings = Depends(get_settings)
+    file: Annotated[Optional[UploadFile], File()] = None,
+    text: Annotated[Optional[str], Form()] = None,
+    settings: Annotated[Settings, Depends(get_settings)] = None,
 ) -> ExtractRulesResponse:
     """
-    Extract structured rules from a document.
+    Extract structured compliance rules from a document.
 
-    Accepts either a file upload (PDF/DOCX) or text input.
-    Returns a structured list of rules with conditions and expected evidence.
-
-    Args:
-        file: PDF or DOCX file upload (optional)
-        text: Raw text input (optional)
-        settings: Application settings
+    Accepts either a file upload (PDF / DOCX) or raw text.
+    Runs the Phase 1 LangGraph pipeline: parse → segment → LLM extraction → aggregate.
 
     Returns:
-        ExtractRulesResponse with extracted rules
+        ExtractRulesResponse with structured rules and metadata.
 
     Raises:
-        HTTPException 400: Invalid input (neither file nor text provided)
-        HTTPException 422: File parsing failed
-        HTTPException 500: Rules extraction failed
+        400: Neither file nor text provided, or input is invalid.
+        422: File cannot be parsed.
+        500: Rules extraction failed unexpectedly.
     """
     try:
         document_id = str(uuid.uuid4())
-        logger.info(f"Processing extract-rules request: {document_id}")
+        logger.info(f"extract-rules request started: document_id={document_id}")
 
-        # Validate that either file or text is provided
         if not file and not text:
-            raise InvalidInputException("Either file or text input must be provided")
+            raise InvalidInputException("Either a file upload or text input must be provided")
 
-        extracted_text = None
+        pipeline = _get_pipeline(settings)
+        rule_dicts: list[dict] = []
 
-        # Process file input
         if file:
-            try:
-                validate_file(file.filename, file.size, settings.max_file_size_mb)
-                logger.debug(f"File validation passed: {file.filename}")
+            validate_file(file.filename, file.size, settings.max_file_size_mb)
+            logger.debug(f"File validated: {file.filename}")
 
-                # TODO: Implement actual file parsing
-                # For now, read text from file
-                if file.filename.endswith('.txt'):
-                    extracted_text = (await file.read()).decode('utf-8')
-                else:
-                    raise FileParseFailed(
-                        "File parsing not yet implemented",
-                        file_type=file.filename.split('.')[-1]
-                    )
-            except FileParseFailed:
-                raise
-            except Exception as e:
-                logger.error(f"File processing error: {str(e)}")
-                raise FileParseFailed(str(e), file_type=file.filename.split('.')[-1])
+            file_bytes = await file.read()
+            filename_lower = (file.filename or "").lower()
 
-        # Process text input
-        if text:
-            try:
-                validate_text(text, settings.max_text_length)
-                extracted_text = text
-                logger.debug("Text validation passed")
-            except InvalidInputException:
-                raise
-
-        # Extract rules from the document text
-        if extracted_text:
-            try:
-                rules = extract_rules_from_text(extracted_text)
-                logger.info(f"Successfully extracted {len(rules)} rules: {document_id}")
-
-                return ExtractRulesResponse(
-                    document_id=document_id,
-                    total_rules=len(rules),
-                    rules=rules,
-                    extraction_timestamp=datetime.utcnow().isoformat() + "Z",
-                    status="success"
+            if filename_lower.endswith(".pdf"):
+                input_type = "pdf"
+            elif filename_lower.endswith((".docx", ".doc")):
+                input_type = "docx"
+            elif filename_lower.endswith(".txt"):
+                rule_dicts = await pipeline.run(
+                    input_type="text",
+                    raw_text=file_bytes.decode("utf-8", errors="replace"),
                 )
-            except Exception as e:
-                logger.error(f"Rules extraction failed: {str(e)}")
-                raise ExtractionFailed(str(e))
+                logger.info(f"Extracted {len(rule_dicts)} rules from text file: document_id={document_id}")
+                return _build_response(document_id, rule_dicts)
+            else:
+                raise InvalidInputException(
+                    f"Unsupported file type: {filename_lower.split('.')[-1]}. "
+                    "Supported types: PDF, DOCX, TXT"
+                )
+
+            rule_dicts = await pipeline.run(
+                input_type=input_type,
+                raw_file_bytes=file_bytes,
+                raw_filename=file.filename,
+            )
+
+        elif text:
+            validate_text(text, settings.max_text_length)
+            logger.debug("Text input validated")
+            rule_dicts = await pipeline.run(input_type="text", raw_text=text)
+
+        logger.info(f"Extraction complete: {len(rule_dicts)} rules, document_id={document_id}")
+        return _build_response(document_id, rule_dicts)
 
     except InvalidInputException as e:
         logger.warning(f"Invalid input: {e.message}")
@@ -142,5 +111,15 @@ async def extract_rules(
         logger.error(f"Extraction failed: {e.message}")
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        logger.error(f"Unexpected error in extract_rules: {str(e)}")
+        logger.error(f"Unexpected error in extract_rules: {e}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
+
+
+def _build_response(document_id: str, rules: list[dict]) -> ExtractRulesResponse:
+    return ExtractRulesResponse(
+        document_id=document_id,
+        total_rules=len(rules),
+        rules=rules,
+        extraction_timestamp=datetime.now(timezone.utc).isoformat(),
+        status="success",
+    )

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import {
   Container,
   Paper,
@@ -9,7 +9,9 @@ import {
   StepLabel
 } from '@mui/material'
 import { DocumentUploadForm } from '../components/DocumentUploadForm'
-import { documentService } from '../services/documentService'
+import { RulesList } from '../components/RulesList'
+import { ReadyForAudit } from '../components/ReadyForAudit'
+import { DUMMY_EXTRACTED_RULES } from '../constants/dummyRules'
 
 const PHASE_STEPS = [
   { label: 'Upload Rules Document', description: 'Provide the rules document' },
@@ -18,34 +20,61 @@ const PHASE_STEPS = [
 ]
 
 export const Phase1 = () => {
-  const [activeStep, setActiveStep] = React.useState(0)
-  const [extractedRules, setExtractedRules] = React.useState(null)
+  const [activeStep, setActiveStep] = useState(0)
+  const [rules, setRules] = useState(null)
+  const [loading, setLoading] = useState(false)
 
   const handleDocumentSubmit = async (payload) => {
+    setLoading(true)
     try {
-      let response
+      // TODO: Replace with actual API call when backend is ready
+      // For now, using dummy data to demonstrate the flow
+      await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      if (payload.type === 'file') {
-        response = await documentService.extractRules(payload.content)
-      } else {
-        response = await documentService.extractRulesFromText(payload.content)
-      }
-
-      setExtractedRules(response.data)
+      // Simulate API response with dummy data
+      setRules([...DUMMY_EXTRACTED_RULES.rules])
       setActiveStep(1)
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to extract rules')
+    } finally {
+      setLoading(false)
     }
   }
 
+  const handleRulesChange = (updatedRules) => {
+    setRules(updatedRules)
+  }
+
+  const handleConfirmRules = () => {
+    setLoading(true)
+    setTimeout(() => {
+      setLoading(false)
+      setActiveStep(2)
+    }, 500)
+  }
+
+  const handleBackToReview = () => {
+    setActiveStep(1)
+  }
+
+  const handleBackToUpload = () => {
+    setRules(null)
+    setActiveStep(0)
+  }
+
+  const handleProceedToAudit = () => {
+    // TODO: Navigate to Phase 2
+    console.log('Proceeding to Phase 2 with rules:', rules)
+  }
+
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 600 }}>
           Document Validator
         </Typography>
         <Typography variant="body1" color="textSecondary" gutterBottom>
-          Phase 1: Rules Extraction
+          Phase 1: Rules Extraction & Confirmation
         </Typography>
       </Box>
 
@@ -70,34 +99,31 @@ export const Phase1 = () => {
           />
         )}
 
-        {activeStep === 1 && (
+        {activeStep === 1 && rules && (
           <Box>
-            <Typography variant="h6" gutterBottom>
-              Extracted Rules
+            <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
+              Review & Confirm Extracted Rules
             </Typography>
             <Typography variant="body2" color="textSecondary" paragraph>
-              {extractedRules && `${extractedRules.rules?.length || 0} rules extracted`}
+              Review the extracted rules below. You can edit, add conditions, or delete rules as needed.
+              Once satisfied, click "Confirm Rules & Continue" to proceed.
             </Typography>
-
-            <Box
-              sx={{
-                backgroundColor: 'grey.50',
-                p: 2,
-                borderRadius: 1,
-                mb: 3,
-                maxHeight: 400,
-                overflowY: 'auto'
-              }}
-            >
-              <pre style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>
-                {JSON.stringify(extractedRules, null, 2)}
-              </pre>
-            </Box>
-
-            <Typography variant="body2" color="textSecondary">
-              Rules preview shown above. You can now proceed to audit documents against these rules.
-            </Typography>
+            <RulesList
+              rules={rules}
+              onRulesChange={handleRulesChange}
+              onConfirm={handleConfirmRules}
+              onBack={handleBackToUpload}
+              loading={loading}
+            />
           </Box>
+        )}
+
+        {activeStep === 2 && rules && (
+          <ReadyForAudit
+            rulesCount={rules.length}
+            onProceedToAudit={handleProceedToAudit}
+            onBack={handleBackToReview}
+          />
         )}
       </Paper>
     </Container>

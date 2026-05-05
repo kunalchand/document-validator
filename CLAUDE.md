@@ -86,6 +86,14 @@ document-validator/
 │   │   │       │   └── __init__.py
 │   │   │       ├── schemas.py          # Pydantic request/response models
 │   │   │       └── __init__.py
+│   │   ├── providers/                  # Provider abstraction layer
+│   │   │   ├── base.py                 # Abstract base classes (LLMProvider, EmbeddingProvider)
+│   │   │   ├── schemas.py              # Standardized request/response models
+│   │   │   ├── factory.py              # Provider factory pattern
+│   │   │   ├── dummy_provider.py       # Mock implementations for testing
+│   │   │   ├── README.md               # Detailed provider documentation
+│   │   │   ├── PROVIDER_TEMPLATE.md    # How to add new providers
+│   │   │   └── __init__.py
 │   │   ├── utils/
 │   │   │   ├── validators.py           # Input validation logic
 │   │   │   └── __init__.py
@@ -96,6 +104,7 @@ document-validator/
 │   │   └── __init__.py
 │   ├── tests/                          # Backend tests (coming soon)
 │   ├── main.py                         # Entry point for running server
+│   ├── .env                            # Environment variables (production config)
 │   ├── .env.example                    # Environment variable template
 │   ├── .gitignore
 │   ├── requirements.txt                # Python dependencies
@@ -232,6 +241,84 @@ python main.py                    # Runs on http://localhost:8000
 
 Access Swagger at `http://localhost:8000/docs`
 
+### Provider Abstraction Layer
+
+**Pattern**: Abstract Factory with Python ABC (Abstract Base Classes)
+
+**Purpose**: Provider-agnostic LLM and embedding integration. Supports any provider (OpenAI, Anthropic, Google, xAI) without code changes.
+
+**Core Architecture**:
+
+1. **Abstract Base Classes** (`app/providers/base.py`):
+   - `LLMProvider` - Interface for language models
+     - `async generate(request)` - Generate text
+     - `async batch_generate(requests)` - Batch processing
+     - `provider_name` - Provider identifier
+     - `available_models` - List of supported models
+   - `EmbeddingProvider` - Interface for embeddings
+     - `async embed(request)` - Generate embeddings
+     - `async batch_embed(requests)` - Batch embeddings
+     - `embedding_dimension` - Vector size
+     - `available_models` - List of models
+
+2. **Standardized Data Models** (`app/providers/schemas.py`):
+   - `LLMRequest` / `LLMResponse` - Type-safe LLM communication
+   - `EmbeddingRequest` / `EmbeddingResponse` - Type-safe embeddings
+   - Pydantic validation ensures data integrity
+
+3. **Implementations**:
+   - **DummyLLMProvider** & **DummyEmbeddingProvider** - Mock implementations for testing (no API calls)
+   - **Planned**: OpenAIProvider, AnthropicProvider, GoogleProvider, etc.
+
+4. **Factory Pattern** (`app/providers/factory.py`):
+   - `ProviderFactory.create_llm_provider()` - Create LLM provider instance
+   - `ProviderFactory.create_embedding_provider()` - Create embedding provider instance
+   - `ProviderFactory.register_*_provider()` - Runtime provider registration
+   - `ProviderType` enum - Supported provider types
+
+**Configuration** (Environment Variables):
+```env
+# Use dummy for development
+LLM_PROVIDER=dummy
+EMBEDDING_PROVIDER=dummy
+
+# Switch to OpenAI in production
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4
+
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=sk-...
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+**Usage Example**:
+```python
+from app.providers import ProviderFactory, LLMRequest
+
+# Create provider (config determines which)
+provider = ProviderFactory.create_llm_provider(
+    provider_type=settings.llm_provider,
+    api_key=settings.llm_api_key,
+    config={"model": settings.llm_model}
+)
+
+# Use identically regardless of implementation
+response = await provider.generate(
+    LLMRequest(prompt="Your prompt")
+)
+```
+
+**Benefits**:
+- ✓ Switch providers via config (no code changes)
+- ✓ Testable with dummy provider
+- ✓ Extensible for new providers
+- ✓ SOLID principles (Dependency Inversion, Open/Closed)
+- ✓ Type-safe with Pydantic validation
+- ✓ Async-first design
+
+**Documentation**: See `app/providers/README.md` for detailed guide and `app/providers/PROVIDER_TEMPLATE.md` for adding new providers.
+
 ### Agentic Layer (Phase 2 - LangGraph)
 
 *Coming in next phase*
@@ -243,33 +330,63 @@ The agentic layer will be built in:
 
 This layer will handle:
 - Document parsing and normalization
-- LLM-powered rules extraction
-- Vector DB embedding and retrieval
+- LLM-powered rules extraction (using provider abstraction)
+- Vector DB embedding and retrieval (using provider abstraction)
 - RAG-based rule evaluation
 
 ## Key Design Decisions
+
+**Backend**:
 - Rules extraction is a deterministic structuring problem — no vector DB in Phase 1
 - Vector DB is used only for the user document in Phase 2
 - Map-reduce (fan-out / fan-in) pattern for both rule extraction and rule evaluation
 - Stateless between API calls — rules are passed explicitly by the client
 - No LangGraph interrupts or checkpointing in v1 (kept simple intentionally)
 - All three input types (PDF, DOCX, raw text) are normalized to plain text before pipeline entry
+- **Provider-agnostic LLM integration** — Abstract factory pattern allows switching between OpenAI, Anthropic, Google, etc. without code changes
+- Generic configuration (LLM_PROVIDER, EMBEDDING_PROVIDER) not hardcoded to any single provider
+- Dummy provider for testing/development without API dependencies
+
+**Frontend**:
 - Frontend components are phase-agnostic where possible (DocumentUploadForm, ConfirmationDialog)
 - Material UI used for consistent, professional styling and accessibility
 - Dummy data approach allows full frontend development without backend dependency
 
 ## Standards & Conventions
-- SOLID principles throughout frontend and backend
+
+**Backend**:
+- SOLID principles throughout (Dependency Inversion, Open/Closed, Single Responsibility, etc.)
+- Abstract Factory pattern for provider abstraction (enables easy provider switching)
 - Structured logging with appropriate log levels (DEBUG / INFO / WARNING / ERROR)
 - Consistent HTTP error responses: `{ status, message, detail }`
 - All secrets and config via environment variables — never hardcoded
-- Constants file for all magic values (model names, chunk sizes, endpoint paths, etc.)
+- Type-safe with Pydantic validation for all requests/responses
+- Generic LLM provider configuration (not OpenAI-specific)
+- Async-first design for scalability
+
+**Frontend & General**:
+- SOLID principles throughout frontend and backend
 - `.env` files excluded from version control; `.env.example` documents required variables
 - No directional icons (arrows) on buttons — text labels speak for themselves
 - Confirmation dialogs for destructive actions (data loss, deletion)
 
 ## Environment Variables
-See `frontend/.env.example` and `backend/.env.example` for required variables.
+
+**Backend** (`backend/.env.example`):
+- `APP_ENV` - Environment (development/production)
+- `LOG_LEVEL` - Logging level (DEBUG/INFO/WARNING/ERROR)
+- `LLM_PROVIDER` - LLM provider type (dummy, openai, anthropic, google, grok)
+- `LLM_API_KEY` - API key for LLM provider
+- `LLM_MODEL` - Model to use (provider-specific)
+- `EMBEDDING_PROVIDER` - Embedding provider type
+- `EMBEDDING_API_KEY` - API key for embedding provider
+- `EMBEDDING_MODEL` - Embedding model to use
+- File limits: `MAX_FILE_SIZE_MB`, `MAX_TEXT_LENGTH`, `MAX_RULES`
+- CORS: `CORS_ORIGINS` (allowed origins)
+
+**Frontend** (`frontend/.env.example`):
+- `VITE_API_BASE_URL` - Backend API URL (default: http://localhost:8000)
+- `VITE_APP_ENV` - Environment
 
 ## Next Steps
 

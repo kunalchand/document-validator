@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -7,8 +8,13 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
-    openai_api_key: str
-    openai_embedding_model: str = "text-embedding-3-small"
+    llm_provider: str = "dummy"
+    llm_api_key: Optional[str] = None
+    llm_model: str = "dummy-model"
+
+    embedding_provider: str = "dummy"
+    embedding_api_key: Optional[str] = None
+    embedding_model: str = "dummy-embedding"
 
     max_file_size_mb: int = 10
     max_text_length: int = 50000

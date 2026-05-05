@@ -1,18 +1,17 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import traceback
 
-from app.config import get_settings
+from app.config import get_settings, Settings
 from app.core import get_logger
 from app.core.exceptions import DocumentValidatorException
 from app.api.v1 import api_router
 
 logger = get_logger(__name__)
-settings = get_settings()
 
 app = FastAPI(
-    title=settings.app_name,
+    title="Document Validator",
     description="Document compliance verification system with AI-powered rules extraction and auditing",
     version="0.1.0",
     docs_url="/docs",
@@ -21,6 +20,7 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -83,10 +83,11 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    _settings = get_settings()
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=settings.app_env == "development",
-        log_level=settings.log_level.lower()
+        reload=_settings.app_env == "development",
+        log_level=_settings.log_level.lower()
     )

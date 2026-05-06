@@ -149,7 +149,8 @@ Three-step user flow with Material UI components:
 - Text input area with character limit tracking
 - Supports PDF, DOCX, and raw text
 - Max file size: 10MB, max text: 50,000 characters
-- Currently uses dummy data (ready for API integration via SSE stream)
+- **Connected to real SSE endpoint** — streams extraction progress in real-time
+- Displays `ExtractionProgress` component showing live pipeline milestones
 
 **Step 2: Review & Confirm**
 - Displays extracted rules in card-based UI
@@ -170,10 +171,10 @@ Three-step user flow with Material UI components:
 - "Proceed to Phase 2: Audit Document" button (TODO: navigate to Phase 2)
 
 ### ExtractionProgress Component
-Real-time SSE progress display for the Phase 1 extraction pipeline.
+Real-time SSE progress display for the Phase 1 extraction pipeline — **integrated into Step 1 of Phase1.jsx**.
 
 **Features**:
-- Receives `events` prop — array of `ExtractionEvent` objects
+- Receives `events` prop — array of real-time `ExtractionEvent` objects from backend SSE stream
 - Collapsible card with current stage name and overall progress bar
 - Segment-level progress text (e.g., "Segment 3 of 7 • 12 rules found so far")
 - Color-coded stages: parsing (blue) / segmentation (orange) / extraction (purple) / finalization (green)
@@ -184,10 +185,12 @@ Real-time SSE progress display for the Phase 1 extraction pipeline.
   - Processing timeline showing all four stages with status badges
   - Full event log with timestamps
 - Error state: red border, warning icon, error message
+- **Production-ready**: Streams actual extraction events from backend
 
-**Demo**: `http://localhost:5173/demo/extraction-progress`
+**Demo Route**: `http://localhost:5173/demo/extraction-progress`
 - Run Success Scenario — realistic full pipeline simulation (~18 seconds)
 - Run Error Scenario — failure handling demonstration
+- Useful for testing UI without backend or reviewing component behavior
 
 ### Routing
 React Router v6 with two routes:
@@ -204,7 +207,10 @@ React Router v6 with two routes:
 
 ### Services & Utilities
 - **apiClient.js**: Axios instance with baseURL and error interceptor
-- **documentService.js**: Methods for `/extract-rules` and `/audit` endpoints
+- **documentService.js**: 
+  - `extractRules()` — sync extraction endpoint (for future use)
+  - `extractRulesStream()` — **SSE streaming endpoint** for real-time progress (currently in use by Phase1)
+  - `auditDocument()` / `auditDocumentWithText()` — Phase 2 audit endpoints
 - **fileValidator.js**: Validation for file type, size, and text length
 - **documentTypes.js**: Constants for MIME types, extensions, limits
 - **extractionSimulator.js**: Async generator functions for UI demo/testing without backend
@@ -380,11 +386,16 @@ const reader = response.body.getReader()
 - `sse-starlette==1.6.5` pinned for compatibility with FastAPI 0.104.1 (starlette<0.28, anyio<4)
 
 **Frontend**:
+- **SSE Integration** (`documentService.extractRulesStream()`):
+  - Uses native `fetch()` API with `ReadableStream` instead of `EventSource` (which only supports GET)
+  - Handles streaming response by reading chunks, splitting on newlines, and parsing `data: ` lines as JSON events
+  - Calls `onEvent` callback for each event, allowing real-time UI updates without accumulating in memory
+  - Properly handles multi-line events and partial buffers during streaming
 - `ExtractionProgress` component is driven entirely by an `events` prop — no internal fetching, making it reusable and fully testable with the simulator
-- `EventSource` not used for SSE because it only supports GET; file uploads require POST with `fetch()` + `ReadableStream`
 - SSE event schema is defined in both Python (Pydantic) and TypeScript (interfaces) to keep the contract explicit and type-safe on both ends
 - React Router added to support the demo route without affecting the main application flow
 - Simulator (`extractionSimulator.js`) uses async generator pattern, mirroring the backend's `stream()` async generator — the frontend component works identically with simulated or real events
+- Phase1 component manages extraction state (`extractionEvents`, `extractionError`) and automatically transitions to review step when `finalization_complete` event arrives with `extracted_rules`
 
 ## Standards & Conventions
 
@@ -426,20 +437,25 @@ const reader = response.body.getReader()
 
 ### Backend (Priority)
 1. **Implement a concrete LLM provider** (OpenAI, Anthropic, Google, or Grok) to replace the dummy provider for production rule extraction — add provider file, register in factory, update `.env`
+   - Currently: Phase 1 backend generates realistic dummy rules to test frontend integration
+   - Once concrete provider is ready: will perform real LLM extraction on document segments
 2. Set up vector database (Chroma / FAISS / Pinecone) for Phase 2
 3. Implement Phase 2 RAG-based audit pipeline (`app/agents/`, `app/pipeline/`)
-4. Write test suite (`backend/tests/`)
+4. Implement Phase 2 SSE streaming endpoint for audit progress
+5. Write test suite (`backend/tests/`)
 
 ### Frontend (Priority)
-1. **Connect Phase 1 upload flow to the SSE endpoint** — replace dummy data in `Phase1.jsx` with a real `fetch()` call to `/api/v1/extract-rules-stream`, render `ExtractionProgress` during extraction, then hand rules to `RulesList`
+1. ✅ **COMPLETE**: Phase 1 SSE integration — Phase1.jsx now streams extraction progress in real-time
+   - Upload document → SSE endpoint processes it → ExtractionProgress displays live events → Rules displayed in review step
 2. Build Phase 2 frontend (Audit Document upload and results view)
 3. Add user feedback via toast notifications (Snackbar) for non-critical events
 4. Add error recovery UI (retry button when extraction fails)
 
-### Integration
-- End-to-end test: upload a real PDF, verify rules extracted and displayed correctly
-- Performance tuning (LLM concurrency, segment size)
-- Comprehensive test coverage (unit, integration)
+### Integration & Testing
+- End-to-end test: upload a real PDF, verify rules extracted and displayed correctly in real-time
+- Test with concrete LLM provider once implemented (currently using dummy provider)
+- Performance tuning (LLM concurrency, segment size optimization)
+- Comprehensive test coverage (unit, integration, E2E)
 
 ## Future Improvements
 - Persistent storage for extracted rules (session or DB)

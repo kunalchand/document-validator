@@ -57,7 +57,7 @@ document-validator/
 │   │   │   ├── RulesList.jsx           # List of rules with search/filter
 │   │   │   ├── ReadyForAudit.jsx       # Phase 1 completion screen
 │   │   │   ├── ConfirmationDialog.jsx  # Reusable confirmation modal
-│   │   │   └── ExtractionProgress.jsx  # Real-time SSE progress display
+│   │   │   └── ExtractionProgress.jsx  # Live + completed SSE progress display
 │   │   ├── pages/
 │   │   │   └── Phase1.jsx              # Three-step flow: Upload → Review → Ready
 │   │   ├── services/
@@ -83,7 +83,7 @@ document-validator/
 │   │   ├── main.py                     # FastAPI app setup with middleware & handlers
 │   │   ├── config.py                   # Settings and configuration (pydantic)
 │   │   ├── core/
-│   │   │   ├── logger.py               # Structured logging utility
+│   │   │   ├── logger.py               # configure_logging() + get_logger(); file + console output
 │   │   │   ├── exceptions.py           # Custom exception classes
 │   │   │   └── __init__.py
 │   │   ├── api/                        # REST API layer (v1 routing)
@@ -127,6 +127,8 @@ document-validator/
 │   │   │   └── __init__.py
 │   │   ├── constants/                  # App-wide constants
 │   │   └── __init__.py
+│   ├── logs/                           # Runtime log files (gitignored except .gitkeep)
+│   │   └── .gitkeep
 │   ├── tests/                          # Backend tests (coming soon)
 │   ├── main.py                         # Entry point for running server
 │   ├── .env                            # Environment variables (gitignored)
@@ -150,17 +152,18 @@ Three-step user flow with Material UI components:
 - Supports PDF, DOCX, and raw text
 - Max file size: 10MB, max text: 50,000 characters
 - **Connected to real SSE endpoint** — streams extraction progress in real-time
-- Displays `ExtractionProgress` component showing live pipeline milestones
+- `ExtractionProgress` renders inside the main Paper card, above the upload form, from the moment the first event arrives
 
 **Step 2: Review & Confirm**
-- Displays extracted rules in card-based UI
+- `ExtractionProgress` persists at the top of the same Paper card in a collapsed "Extraction Complete" state — expand to view the full event log
+- Displays extracted rules in card-based UI below the progress summary
 - Search by title/description
 - Filter by severity (high/medium/low)
 - Rule summary stats (total count, breakdown by severity)
 - Inline editing: modify conditions and expected evidence
 - Add/remove individual conditions and evidence items
 - Delete rules with confirmation dialog
-- "Upload New Document" button with confirmation (prevents accidental data loss)
+- "Upload New Document" button with confirmation (clears events, rules, and error state)
 - "Confirm Rules & Continue" button to move to step 3
 
 **Step 3: Ready for Audit**
@@ -170,21 +173,39 @@ Three-step user flow with Material UI components:
 - "Back to Review" button (returns to step 2)
 - "Proceed to Phase 2: Audit Document" button (TODO: navigate to Phase 2)
 
-### ExtractionProgress Component
-Real-time SSE progress display for the Phase 1 extraction pipeline — **integrated into Step 1 of Phase1.jsx**.
+### ExtractionProgress Component (`ExtractionProgress.jsx`)
+Dual-mode SSE progress display — live during extraction, persistent log after completion.
 
 **Features**:
-- Receives `events` prop — array of real-time `ExtractionEvent` objects from backend SSE stream
+- Receives `events` prop — array of `ExtractionEvent` objects from backend SSE stream
 - Collapsible card with current stage name and overall progress bar
 - Segment-level progress text (e.g., "Segment 3 of 7 • 12 rules found so far")
 - Color-coded stages: parsing (blue) / segmentation (orange) / extraction (purple) / finalization (green)
-- Animated spinning icon for the active stage, checkmark for completed stages
+- Animated spinning icon for the active stage, checkmark for all completed stages
+- When `isComplete`: all four stages show the checkmark (finalization stage no longer stuck on "active")
 - **Expandable details panel** shows:
   - Key metrics grid (document size, sections found, rules found/unique)
   - Section titles identified (as chips)
   - Processing timeline showing all four stages with status badges
   - Full event log with timestamps
 - Error state: red border, warning icon, error message
+- Starts collapsed by default — useful on step 1 where it acts as an audit trail
+
+### Toast Notifications (Snackbar)
+MUI `Snackbar` in `Phase1.jsx` at the container level — persists across step transitions.
+
+| Trigger | Severity | Message |
+|---------|----------|---------|
+| `extraction_complete` with `failed_segments > 0` | warning | "N section(s) failed during extraction — results may be incomplete. Check backend logs for details." |
+| `error` SSE event | error | "Extraction failed: \<message\>" |
+| Network / fetch error | error | Error message from the thrown exception |
+
+### Layout — Single Card Surface
+`ExtractionProgress` lives inside the `<Paper>` card for all steps:
+- **Before extraction**: card shows the upload form only (no events yet)
+- **During extraction**: progress bar at the top of the card; upload form hidden while loading
+- **Step 1 (review)**: collapsed "Extraction Complete" summary at top of card; header text and rules list below
+- **"Upload New Document"**: clears `extractionEvents`, `extractionError`, and rules — card returns to clean upload state
 
 ### Routing
 React Router v6 with a single production route:
@@ -195,7 +216,7 @@ React Router v6 with a single production route:
 - **RuleCard**: Editable rule with expand/collapse for conditions and evidence
 - **RulesList**: Stateful list with search, filter, and CRUD operations
 - **ConfirmationDialog**: Reusable modal for destructive actions
-- **ExtractionProgress**: Real-time SSE event display with collapsible details
+- **ExtractionProgress**: Live + completed SSE event display with collapsible details; driven entirely by `events` prop
 - Material UI theme applied globally via `ThemeProvider`
 
 ### Services & Utilities
@@ -207,13 +228,13 @@ React Router v6 with a single production route:
 - **fileValidator.js**: Validation for file type, size, and text length
 - **documentTypes.js**: Constants for MIME types, extensions, limits
 
-### TypeScript Types
-- **types/extraction.ts**: Full TypeScript interface definitions for the SSE event schema
-  - `ExtractionEvent` — top-level event interface (matches Python `ExtractionEvent` Pydantic model)
-  - `ExtractionEventType` — union of all 10 valid event type strings
-  - `ExtractionStage` — pipeline stage union
-  - `ExtractionProgress` — `current`, `total`, `percent`
-  - `ExtractionEventData` — all contextual data fields
+### TypeScript Types (`types/extraction.ts`)
+Full TypeScript interface definitions for the SSE event schema — mirrors the Python Pydantic models:
+- `ExtractionEvent` — top-level event interface
+- `ExtractionEventType` — union of all 10 valid event type strings
+- `ExtractionStage` — pipeline stage union
+- `ExtractionProgress` — `current`, `total`, `percent`
+- `ExtractionEventData` — all contextual data fields including `failed_segments` and `extracted_rules`
 
 ### Build & Run
 ```bash
@@ -244,10 +265,16 @@ npm run build            # Production build
 - `ErrorResponse`: status, message, detail
 
 **Core Components**:
-1. **Configuration** (`config.py`): Pydantic BaseSettings, LRU-cached singleton; defaults to `ollama` + `llama2`
-2. **Logging** (`core/logger.py`): Structured logging, configurable level
+1. **Configuration** (`config.py`): Pydantic BaseSettings, LRU-cached singleton; defaults to `ollama` + `llama2`; includes `log_file` setting
+2. **Logging** (`core/logger.py`): `configure_logging(log_level, log_file)` sets up the root logger once at startup with a console `StreamHandler` and a `RotatingFileHandler` (10 MB per file, 5 backups). `get_logger(name)` returns named child loggers that inherit both handlers. Called from `main.py` before any logger is created.
 3. **Exceptions** (`core/exceptions.py`): `InvalidInputException` (400), `FileParseFailed` (422), `ExtractionFailed` (500), `AuditFailed` (500)
 4. **Validation** (`utils/validators.py`): `validate_file()`, `validate_text()`
+
+**Log file**: written to `backend/logs/app.log` by default. Tail it live:
+```bash
+tail -f backend/logs/app.log
+```
+Set `LOG_FILE=` (empty) in `backend/.env` to disable file logging.
 
 **Build & Run**:
 ```bash
@@ -312,7 +339,7 @@ LLM_MODEL=grok-3-mini
 Pure helper functions used by the pipeline nodes:
 - **`segment_text(text, max_chars=3000)`**: Splits on section headings (numbered, ALL-CAPS, markdown, Article/Section/Chapter patterns), falls back to paragraph-boundary chunking
 - **`build_extraction_prompt(segment)`**: Formats the structured JSON-extraction prompt for the LLM
-- **`parse_llm_response(content, segment_index)`**: Strips markdown fences, extracts JSON array, validates and constructs `RuleCandidate` objects
+- **`parse_llm_response(content, segment_index)`**: Strips markdown fences, extracts JSON array, validates and constructs `RuleCandidate` objects; on JSON decode error logs the first 300 characters of the LLM response for debugging
 - **`deduplicate_rules(candidates)`**: Removes duplicates by normalized title
 
 #### SSE Event Schema (`app/agents/events.py`)
@@ -320,7 +347,7 @@ Pydantic models that mirror the TypeScript types in `frontend/src/types/extracti
 - **`ExtractionEventType`** (str Enum): `parsing_started`, `parsing_complete`, `segmentation_started`, `segmentation_complete`, `extraction_started`, `extraction_progress`, `extraction_complete`, `finalization_started`, `finalization_complete`, `error`
 - **`ExtractionStage`** (str Enum): `parsing`, `segmentation`, `extraction`, `finalization`
 - **`ExtractionProgress`**: current, total, percent
-- **`ExtractionEventData`**: char_count, page_count, section_count, section_titles, segment_index, segment_title, rules_in_segment, total_rules_so_far, total_rules, unique_rules, extracted_rules (only in `finalization_complete`)
+- **`ExtractionEventData`**: char_count, page_count, section_count, section_titles, segment_index, segment_title, rules_in_segment, total_rules_so_far, **`failed_segments`** (count of worker failures in `extraction_complete`), total_rules, unique_rules, extracted_rules (only in `finalization_complete`)
 - **`ExtractionEvent`**: event_type, stage, message, progress, data, timestamp, event_id
 
 #### LangGraph State (`app/pipeline/phase1_state.py`)
@@ -345,8 +372,12 @@ LangGraph `StateGraph` with four nodes and two execution modes:
 **Nodes**:
 - `parse_input`: Routes to the correct parser; emits `parsing_started`, `parsing_complete`
 - `segment_content`: Calls `segment_text()`; emits `segmentation_started`, `segmentation_complete` (with section count and titles)
-- `orchestrate_extraction`: Dispatches `asyncio.gather` fan-out of worker tasks; emits `extraction_started`, one `extraction_progress` per segment (with `asyncio.Lock` for safe concurrent counter), `extraction_complete`
+- `orchestrate_extraction`: Dispatches `asyncio.gather` fan-out of worker tasks; emits `extraction_started`, one `extraction_progress` per segment (with `asyncio.Lock` for safe concurrent counter), `extraction_complete` — the `extraction_complete` event includes `failed_segments` count so the frontend can warn the user if any workers failed
 - `finalize_rules`: Deduplicates, assigns `rule_NNN` IDs; emits `finalization_started`, `finalization_complete` (with full `extracted_rules` list in event data)
+
+**Error observability**:
+- `_worker_extract` uses `logger.exception()` — full traceback written to log file on any LLM or parse failure
+- `_orchestrate_extraction` counts failed workers and includes the count in `extraction_complete` event data (`failed_segments` field) and in the event message
 
 **Event emission**: `_emit()` calls `asyncio.Queue.put_nowait()` — non-blocking, safe from both sync and async nodes
 
@@ -390,6 +421,7 @@ const reader = response.body.getReader()
 - **Two endpoint modes**: `/extract-rules` (sync JSON) and `/extract-rules-stream` (SSE) — same pipeline, different execution paths (`run()` vs `stream()`)
 - **Circular import prevention**: pipeline layer (`app/pipeline/`) never imports from API layer (`app/api/`); pipeline returns `list[dict]`, API layer owns Pydantic conversion
 - `sse-starlette==1.6.5` pinned for compatibility with FastAPI 0.104.1 (starlette<0.28, anyio<4)
+- **Logging**: `configure_logging()` called once at app startup; root logger gets both console and rotating file handler; all module loggers inherit via standard Python logging hierarchy
 
 **Frontend**:
 - **SSE Integration** (`documentService.extractRulesStream()`):
@@ -397,8 +429,10 @@ const reader = response.body.getReader()
   - Handles streaming response by reading chunks, splitting on newlines, and parsing `data: ` lines as JSON events
   - Calls `onEvent` callback for each event, allowing real-time UI updates without accumulating in memory
 - `ExtractionProgress` component is driven entirely by an `events` prop — no internal fetching
+- `ExtractionProgress` lives inside the `<Paper>` card for all steps — single card surface; no blank card during loading
 - SSE event schema is defined in both Python (Pydantic) and TypeScript (interfaces) to keep the contract explicit and type-safe on both ends
 - Phase1 component manages extraction state (`extractionEvents`, `extractionError`) and automatically transitions to review step when `finalization_complete` event arrives with `extracted_rules`
+- Partial failures (some segments failed, but extraction completed) surface as a MUI Snackbar warning rather than a fatal error — user is informed but can still review the partial results
 - No demo/simulator code in production — all data flows from the real backend
 
 ## Standards & Conventions
@@ -406,7 +440,7 @@ const reader = response.body.getReader()
 **Backend**:
 - SOLID principles throughout (Dependency Inversion, Open/Closed, Single Responsibility)
 - Abstract Factory pattern for provider abstraction
-- Structured logging with appropriate levels (DEBUG / INFO / WARNING / ERROR)
+- Structured logging with appropriate levels (DEBUG / INFO / WARNING / ERROR); `logger.exception()` used for unexpected failures to capture full tracebacks
 - Consistent HTTP error responses: `{ status, message, detail }`
 - All secrets via environment variables — never hardcoded
 - Type-safe with Pydantic validation for all requests/responses and SSE events
@@ -418,12 +452,14 @@ const reader = response.body.getReader()
 - No directional icons (arrows) on buttons — text labels speak for themselves
 - Confirmation dialogs for destructive actions (data loss, deletion)
 - Component props are the single source of truth — no hidden internal API calls in display components
+- Toast notifications (MUI Snackbar) for non-fatal warnings that survive step transitions
 
 ## Environment Variables
 
 **Backend** (`backend/.env.example`):
 - `APP_ENV` - Environment (production)
 - `LOG_LEVEL` - Logging level (DEBUG/INFO/WARNING/ERROR)
+- `LOG_FILE` - Path to log file relative to `backend/` (default: `logs/app.log`; set empty to disable)
 - `LLM_PROVIDER` - LLM provider: `ollama` | `anthropic` | `grok`
 - `LLM_API_KEY` - API key (not required for Ollama)
 - `LLM_MODEL` - Model name (provider-specific; e.g. `llama2`, `mistral`, `claude-haiku-4-5-20251001`)
@@ -447,9 +483,10 @@ const reader = response.body.getReader()
 
 ### Frontend (Priority)
 1. ✅ **COMPLETE**: Phase 1 — real SSE extraction, ExtractionProgress, rules review flow
-2. Build Phase 2 frontend (Audit Document upload and compliance results view)
-3. Add toast notifications (Snackbar) for non-critical events
-4. Add error recovery UI (retry button when extraction fails)
+2. ✅ **COMPLETE**: Toast notifications (Snackbar) for partial failures and fatal errors
+3. ✅ **COMPLETE**: Persistent extraction log on step 1 (collapsed "Extraction Complete" summary)
+4. Build Phase 2 frontend (Audit Document upload and compliance results view)
+5. Add error recovery UI (retry button when extraction fails)
 
 ### Integration & Testing
 - End-to-end test with a real PDF document across all three LLM providers

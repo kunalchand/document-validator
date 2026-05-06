@@ -55,7 +55,7 @@ Each node's role:
 |------|---------|----------------|
 | `parse_input` | Router | Dispatches the input to the correct parser based on file type, normalizes everything to plain text |
 | `segment_content` | Segmenter | Splits the text into logical sections (numbered headings, ALL-CAPS, Markdown, Article/Section/Chapter patterns); falls back to paragraph-boundary chunking when sections exceed `max_chars` |
-| `orchestrate_extraction` | Orchestrator | Fans out one async LLM worker per segment via `asyncio.gather`; emits a progress event each time a worker completes |
+| `orchestrate_extraction` | Orchestrator | Fans out one async LLM worker per segment via `asyncio.gather`; emits a progress event each time a worker completes; counts and reports failed workers in the `extraction_complete` event |
 | `finalize_rules` | Synthesizer | Deduplicates candidates by normalized title, assigns sequential `rule_NNN` IDs, and packages the final list into the `finalization_complete` SSE event |
 
 > The diagram above is a conceptual view. The auto-generated LangGraph diagram (via `pipeline._graph.get_graph().draw_mermaid()`) shows the four nodes only — the per-segment workers exist *inside* `orchestrate_extraction` as `asyncio` tasks rather than as separate graph nodes.
@@ -114,6 +114,35 @@ LLM_MODEL=grok-3-mini
 
 Restart the backend after changing the provider.
 
+## Logging
+
+The backend writes structured logs to both the terminal and a rotating log file.
+
+**Default log file**: `backend/logs/app.log` (10 MB per file, 5 backups kept)
+
+```bash
+# Follow logs in real-time
+tail -f backend/logs/app.log
+```
+
+Configure in `backend/.env`:
+
+```env
+LOG_LEVEL=INFO              # DEBUG | INFO | WARNING | ERROR
+LOG_FILE=logs/app.log       # relative to backend/; set empty to disable file logging
+```
+
+Worker failures (e.g. LLM timeouts, JSON parse errors) are logged with full tracebacks. If extraction completes but some sections failed, a warning toast appears in the UI directing you to the log file for details.
+
+## UI Flow
+
+The frontend is a three-step flow inside a single card:
+
+1. **Upload** — drag-and-drop or paste your rules document; click "Extract Rules"
+2. **Live progress** — the card shows real-time extraction milestones as the pipeline runs; a warning toast appears if any sections fail
+3. **Review & Confirm** — the card transitions to show a collapsed "Extraction Complete" summary (expand it for the full event log) above the extracted rules list; edit, delete, or add rules before confirming
+4. **Ready for Audit** — confirmation screen; Phase 2 audit coming soon
+
 ## Supported Input Formats
 
 | Format | Extension | Notes |
@@ -140,6 +169,7 @@ Max file size: 10 MB. Max pasted text: 50,000 characters.
 document-validator/
 ├── frontend/     # React application
 ├── backend/      # FastAPI + LangGraph pipeline
+│   └── logs/     # Runtime log files (app.log written here)
 └── CLAUDE.md     # Full technical reference for contributors
 ```
 

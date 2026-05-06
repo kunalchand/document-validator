@@ -89,7 +89,6 @@ const ExtractionProgress = ({ events = [] }) => {
       sx={{
         backgroundColor: isError ? '#FFEBEE' : '#F5F5F5',
         borderLeft: `4px solid ${isError ? '#F44336' : STAGE_COLORS[currentStage]}`,
-        marginY: 2,
       }}
     >
       <CardContent>

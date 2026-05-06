@@ -174,10 +174,14 @@ def parse_llm_response(content: str, segment_index: int) -> List[RuleCandidate]:
         return candidates
 
     except json.JSONDecodeError as e:
-        logger.warning(f"JSON decode error for segment {segment_index}: {e}")
+        snippet = content[:300].replace("\n", " ") if content else ""
+        logger.warning(
+            f"JSON decode error for segment {segment_index}: {e} | "
+            f"LLM response (first 300 chars): {snippet!r}"
+        )
         return []
     except Exception as e:
-        logger.error(f"Unexpected error parsing LLM response for segment {segment_index}: {e}")
+        logger.exception(f"Unexpected error parsing LLM response for segment {segment_index}")
         return []
 
 

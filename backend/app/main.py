@@ -5,9 +5,12 @@ import traceback
 
 from app.config import get_settings, Settings
 from app.core import get_logger
+from app.core.logger import configure_logging
 from app.core.exceptions import DocumentValidatorException
 from app.api.v1 import api_router
 
+_settings = get_settings()
+configure_logging(log_level=_settings.log_level, log_file=_settings.log_file)
 logger = get_logger(__name__)
 
 app = FastAPI(
@@ -20,7 +23,7 @@ app = FastAPI(
 )
 
 # Add CORS middleware
-settings = get_settings()
+settings = _settings
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -83,7 +86,6 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    _settings = get_settings()
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

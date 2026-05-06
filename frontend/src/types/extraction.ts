@@ -36,8 +36,10 @@ export interface ExtractionEventData {
   segment_title?: string;
   rules_in_segment?: number;
   total_rules_so_far?: number;
+  failed_segments?: number;
   total_rules?: number;
   unique_rules?: number;
+  extracted_rules?: Record<string, unknown>[];
 }
 
 export interface ExtractionEvent {

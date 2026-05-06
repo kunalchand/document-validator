@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "Document Validator"
     app_env: str = "development"
     log_level: str = "INFO"
+    log_file: Optional[str] = "logs/app.log"
 
     # LLM provider: ollama | anthropic | grok
     llm_provider: str = "ollama"

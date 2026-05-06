@@ -50,6 +50,9 @@ class ExtractionEventData(BaseModel):
     rules_in_segment: Optional[int] = None
     total_rules_so_far: Optional[int] = None
 
+    # Extraction summary
+    failed_segments: Optional[int] = None  # number of segments where LLM worker failed
+
     # Finalization
     total_rules: Optional[int] = None
     unique_rules: Optional[int] = None

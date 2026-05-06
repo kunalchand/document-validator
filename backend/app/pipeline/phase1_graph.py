@@ -210,19 +210,31 @@ class Phase1Pipeline:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_candidates: list[RuleCandidate] = []
+        failed_count = 0
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.warning(f"Worker for segment {i} failed: {result}")
+                failed_count += 1
+                logger.error(f"Worker for segment {i} failed (already logged with traceback above)")
             else:
                 all_candidates.extend(result)
 
-        logger.info(f"Orchestration complete: {len(all_candidates)} raw rule candidates")
+        logger.info(
+            f"Orchestration complete: {len(all_candidates)} raw candidates, "
+            f"{failed_count}/{total} segments failed"
+        )
+
+        summary = f"Extracted {len(all_candidates)} rule candidates from {total - failed_count} sections"
+        if failed_count:
+            summary += f" ({failed_count} section{'s' if failed_count > 1 else ''} failed)"
 
         self._emit(ExtractionEvent(
             event_type=ExtractionEventType.extraction_complete,
             stage=ExtractionStage.extraction,
-            message=f"Extracted {len(all_candidates)} rule candidates from all sections",
-            data=ExtractionEventData(total_rules=len(all_candidates)),
+            message=summary,
+            data=ExtractionEventData(
+                total_rules=len(all_candidates),
+                failed_segments=failed_count,
+            ),
         ))
 
         return {"rule_candidates": all_candidates}
@@ -243,8 +255,8 @@ class Phase1Pipeline:
             candidates = parse_llm_response(response.content, segment.index)
             logger.debug(f"Segment {segment.index}: {len(candidates)} candidates extracted")
             return candidates
-        except Exception as e:
-            logger.error(f"Worker failed for segment {segment.index}: {e}")
+        except Exception:
+            logger.exception(f"Worker failed for segment {segment.index} ({segment.title!r})")
             raise
 
     def _finalize_rules(self, state: Phase1State) -> dict:

@@ -7,7 +7,8 @@ import {
   Stepper,
   Step,
   StepLabel,
-  Alert
+  Alert,
+  Snackbar
 } from '@mui/material'
 import { DocumentUploadForm } from '../components/DocumentUploadForm'
 import { RulesList } from '../components/RulesList'
@@ -27,6 +28,15 @@ export const Phase1 = () => {
   const [loading, setLoading] = useState(false)
   const [extractionEvents, setExtractionEvents] = useState([])
   const [extractionError, setExtractionError] = useState(null)
+  const [notification, setNotification] = useState({ open: false, message: '', severity: 'warning' })
+
+  const showNotification = (message, severity = 'warning') => {
+    setNotification({ open: true, message, severity })
+  }
+
+  const handleCloseNotification = () => {
+    setNotification((prev) => ({ ...prev, open: false }))
+  }
 
   const handleDocumentSubmit = async (payload) => {
     setLoading(true)
@@ -45,12 +55,23 @@ export const Phase1 = () => {
           setActiveStep(1)
         }
 
+        if (event.event_type === 'extraction_complete' && event.data?.failed_segments > 0) {
+          const n = event.data.failed_segments
+          showNotification(
+            `${n} section${n > 1 ? 's' : ''} failed during extraction — results may be incomplete. Check backend logs for details.`,
+            'warning'
+          )
+        }
+
         if (event.event_type === 'error') {
           setExtractionError(event.message)
+          showNotification(`Extraction failed: ${event.message}`, 'error')
         }
       })
     } catch (error) {
-      setExtractionError(error.message || 'Failed to extract rules')
+      const msg = error.message || 'Failed to extract rules'
+      setExtractionError(msg)
+      showNotification(msg, 'error')
     } finally {
       setLoading(false)
     }
@@ -157,6 +178,21 @@ export const Phase1 = () => {
           />
         )}
       </Paper>
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={8000}
+        onClose={handleCloseNotification}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={handleCloseNotification}
+          severity={notification.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {notification.message}
+        </Alert>
+      </Snackbar>
     </Container>
   )
 }

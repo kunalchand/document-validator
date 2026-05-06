@@ -181,17 +181,30 @@ class Phase1Pipeline:
 
         async def worker_with_emit(segment: DocumentSegment) -> list[RuleCandidate]:
             nonlocal completed, total_candidates_so_far
+            segment_label = segment.title or f"Section {segment.index + 1}"
+
+            # Emit "processing started" event before worker begins
+            self._emit(ExtractionEvent(
+                event_type=ExtractionEventType.extraction_progress,
+                stage=ExtractionStage.extraction,
+                message=f'Processing "{segment_label}"...',
+                data=ExtractionEventData(
+                    segment_index=segment.index,
+                    segment_title=segment_label,
+                ),
+            ))
+
             candidates = await self._worker_extract(segment)
 
             async with progress_lock:
                 completed += 1
                 total_candidates_so_far += len(candidates)
-                segment_label = segment.title or f"Section {segment.index + 1}"
 
+                # Emit "processing complete" event with results
                 self._emit(ExtractionEvent(
                     event_type=ExtractionEventType.extraction_progress,
                     stage=ExtractionStage.extraction,
-                    message=f'Processed "{segment_label}"',
+                    message=f'Processed "{segment_label}" → {len(candidates)} rules extracted',
                     progress=ExtractionProgress(
                         current=completed,
                         total=total,

@@ -146,13 +146,13 @@ export const RuleCard = ({ rule, onUpdate, onDelete }) => {
             />
           ) : (
             <Typography variant="body2" color="textSecondary" paragraph>
-              {displayedRule.description}
+              {displayedRule.description || 'N/A'}
             </Typography>
           )}
 
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption" color="textSecondary" display="block">
-              Section: {displayedRule.section}
+              Section: {displayedRule.section || 'N/A'}
             </Typography>
           </Box>
         </CardContent>
@@ -282,24 +282,32 @@ export const RuleCard = ({ rule, onUpdate, onDelete }) => {
             <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
               Conditions
             </Typography>
-            <Stack component="ul" spacing={0.5} sx={{ mb: 2, pl: 2 }}>
-              {displayedRule.conditions.map((condition, idx) => (
-                <Typography key={idx} component="li" variant="body2">
-                  {condition}
-                </Typography>
-              ))}
-            </Stack>
+            {displayedRule.conditions.length > 0 ? (
+              <Stack component="ul" spacing={0.5} sx={{ mb: 2, pl: 2 }}>
+                {displayedRule.conditions.map((condition, idx) => (
+                  <Typography key={idx} component="li" variant="body2">
+                    {condition}
+                  </Typography>
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>N/A</Typography>
+            )}
 
             <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
               Expected Evidence
             </Typography>
-            <Stack component="ul" spacing={0.5} sx={{ pl: 2 }}>
-              {displayedRule.expected_evidence.map((evidence, idx) => (
-                <Typography key={idx} component="li" variant="body2">
-                  {evidence}
-                </Typography>
-              ))}
-            </Stack>
+            {displayedRule.expected_evidence.length > 0 ? (
+              <Stack component="ul" spacing={0.5} sx={{ pl: 2 }}>
+                {displayedRule.expected_evidence.map((evidence, idx) => (
+                  <Typography key={idx} component="li" variant="body2">
+                    {evidence}
+                  </Typography>
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="textSecondary">N/A</Typography>
+            )}
           </CardContent>
         </Collapse>
       </Card>

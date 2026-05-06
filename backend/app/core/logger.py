@@ -12,12 +12,23 @@ def configure_logging(log_level: str = "INFO", log_file: Optional[str] = None) -
     """
     Configure the root logger once at app startup.
     All module-level loggers (via get_logger) inherit these handlers.
+
+    Note: uvicorn.run() calls logging.config.dictConfig() internally, which resets the
+    root logger level back to INFO regardless of what we set here. To prevent that from
+    silencing our app-level DEBUG logs, we explicitly pin the level on the 'app' package
+    logger — uvicorn's dictConfig only touches root and uvicorn-namespaced loggers.
     """
     level = getattr(logging, log_level.upper(), logging.INFO)
     formatter = logging.Formatter(fmt=_LOG_FORMAT, datefmt=_DATE_FORMAT)
 
     root = logging.getLogger()
     root.setLevel(level)
+
+    # Pin our app namespace explicitly so uvicorn's dictConfig can't reset it
+    logging.getLogger("app").setLevel(level)
+
+    # Suppress httpx's per-request INFO logs (HTTP Request: POST ...) — too noisy
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     # Avoid adding duplicate handlers if called more than once
     if root.handlers:

@@ -95,6 +95,8 @@ export const Phase1 = () => {
 
   const handleBackToUpload = () => {
     setRules(null)
+    setExtractionEvents([])
+    setExtractionError(null)
     setActiveStep(0)
   }
 
@@ -125,16 +127,16 @@ export const Phase1 = () => {
       </Stepper>
 
       <Paper elevation={2} sx={{ p: 4 }}>
+        {extractionEvents.length > 0 && (
+          <Box sx={{ mb: activeStep === 0 && !extractionError ? 0 : 3 }}>
+            <ExtractionProgress events={extractionEvents} />
+          </Box>
+        )}
+
         {activeStep === 0 && (
           <Box>
-            {loading && extractionEvents.length > 0 && (
-              <Box sx={{ mb: 4 }}>
-                <ExtractionProgress events={extractionEvents} />
-              </Box>
-            )}
-
             {extractionError && (
-              <Alert severity="error" sx={{ mb: 3 }}>
+              <Alert severity="error" sx={{ mb: 3, mt: extractionEvents.length > 0 ? 3 : 0 }}>
                 {extractionError}
               </Alert>
             )}
@@ -160,13 +162,6 @@ export const Phase1 = () => {
               Review the extracted rules below. You can edit, add conditions, or delete rules as needed.
               Once satisfied, click "Confirm Rules & Continue" to proceed.
             </Typography>
-
-            {extractionEvents.length > 0 && (
-              <Box sx={{ mb: 3 }}>
-                <ExtractionProgress events={extractionEvents} />
-              </Box>
-            )}
-
             <RulesList
               rules={rules}
               onRulesChange={handleRulesChange}

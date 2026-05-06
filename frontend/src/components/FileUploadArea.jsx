@@ -53,7 +53,7 @@ export const FileUploadArea = ({ onFileSelect, loading = false, error = null }) 
   }
 
   return (
-    <Box component="form" noValidate autoComplete="off">
+    <Box>
       <Paper
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}

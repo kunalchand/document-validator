@@ -71,8 +71,9 @@ const ExtractionProgress = ({ events = [] }) => {
   const uniqueRules = finalEvent?.data?.unique_rules;
 
   const getStageIcon = (stage) => {
-    const completed = stageSequence.indexOf(stage) < currentStageIndex;
-    const active = stage === currentStage;
+    const stageIdx = stageSequence.indexOf(stage);
+    const completed = isComplete || stageIdx < currentStageIndex;
+    const active = !isComplete && stage === currentStage;
 
     if (completed) {
       return <CheckCircleIcon sx={{ color: STAGE_COLORS[stage] }} />;
@@ -252,8 +253,8 @@ const ExtractionProgress = ({ events = [] }) => {
             </Typography>
             <List sx={{ backgroundColor: '#FAFAFA', borderRadius: 1, padding: 0 }}>
               {stageSequence.map((stage, idx) => {
-                const completed = stageSequence.indexOf(stage) < currentStageIndex;
-                const active = stage === currentStage;
+                const completed = isComplete || stageSequence.indexOf(stage) < currentStageIndex;
+                const active = !isComplete && stage === currentStage;
                 const stageEvents = events.filter(e => e.stage === stage);
                 const lastStageEvent = stageEvents[stageEvents.length - 1];
 

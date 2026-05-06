@@ -160,6 +160,13 @@ export const Phase1 = () => {
               Review the extracted rules below. You can edit, add conditions, or delete rules as needed.
               Once satisfied, click "Confirm Rules & Continue" to proceed.
             </Typography>
+
+            {extractionEvents.length > 0 && (
+              <Box sx={{ mb: 3 }}>
+                <ExtractionProgress events={extractionEvents} />
+              </Box>
+            )}
+
             <RulesList
               rules={rules}
               onRulesChange={handleRulesChange}

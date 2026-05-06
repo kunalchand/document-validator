@@ -3,7 +3,7 @@ from enum import Enum
 
 from app.core import get_logger
 from app.providers.base import LLMProvider, EmbeddingProvider
-from app.providers.dummy_provider import DummyLLMProvider, DummyEmbeddingProvider
+from app.providers.dummy_provider import DummyEmbeddingProvider
 from app.providers.anthropic_provider import AnthropicLLMProvider
 from app.providers.grok_provider import GrokLLMProvider
 from app.providers.ollama_provider import OllamaLLMProvider
@@ -12,11 +12,11 @@ logger = get_logger(__name__)
 
 
 class ProviderType(str, Enum):
-    """Supported LLM provider types"""
-    DUMMY = "dummy"
+    """Supported LLM/Embedding provider types"""
     ANTHROPIC = "anthropic"
     GROK = "grok"
     OLLAMA = "ollama"
+    DUMMY = "dummy"     # embedding placeholder only — not valid for LLM
     OPENAI = "openai"   # reserved for future use
     GOOGLE = "google"   # reserved for future use
 
@@ -28,7 +28,6 @@ class ProviderFactory:
     """
 
     _llm_providers = {
-        ProviderType.DUMMY: DummyLLMProvider,
         ProviderType.ANTHROPIC: AnthropicLLMProvider,
         ProviderType.GROK: GrokLLMProvider,
         ProviderType.OLLAMA: OllamaLLMProvider,
@@ -36,7 +35,7 @@ class ProviderFactory:
 
     _embedding_providers = {
         ProviderType.DUMMY: DummyEmbeddingProvider,
-        # Embedding providers for Anthropic/Grok/Ollama added in Phase 2
+        # Real embedding providers added in Phase 2
     }
 
     @classmethod
@@ -70,9 +69,10 @@ class ProviderFactory:
 
         provider_class = cls._llm_providers.get(provider_enum)
         if not provider_class:
+            available = [p.value for p in cls._llm_providers]
             raise ValueError(
-                f"LLM provider '{provider_type}' is not yet implemented. "
-                f"Available: {list(cls._llm_providers.keys())}"
+                f"'{provider_type}' is not a valid LLM provider. "
+                f"Set LLM_PROVIDER to one of: {', '.join(available)}"
             )
 
         logger.info(f"Creating LLM provider: {provider_type}")

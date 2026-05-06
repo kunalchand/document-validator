@@ -127,7 +127,7 @@ tail -f backend/logs/app.log
 
 **What gets logged**:
 - Worker failures (LLM timeouts, JSON parse errors) with full tracebacks
-- All SSE events in real-time (when `LOG_LEVEL=DEBUG`)
+- All SSE events in real-time (when `LOG_LEVEL=DEBUG`), including per-segment processing start/completion
 - Pipeline stage transitions and metrics (segments found, rules extracted, deduplication, etc.)
 
 Configure in `backend/.env`:
@@ -141,7 +141,10 @@ Enable `LOG_LEVEL=DEBUG` to see SSE events logged as they stream:
 ```
 [SSE] parsing_complete | parsing | Document parsed: 12,450 characters
 [SSE] segmentation_complete | segmentation | Found 5 logical sections
-[SSE] extraction_progress | extraction | Processed "Section 1"
+[SSE] extraction_progress | extraction | Processing "Section 1"...
+[SSE] extraction_progress | extraction | Processed "Section 1" → 2 rules extracted
+[SSE] extraction_progress | extraction | Processing "Section 2"...
+[SSE] extraction_progress | extraction | Processed "Section 2" → 3 rules extracted
 ```
 
 If extraction completes but some sections failed, a warning toast appears in the UI directing you to the log file for details.

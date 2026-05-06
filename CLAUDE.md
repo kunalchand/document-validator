@@ -187,7 +187,7 @@ Dual-mode SSE progress display — live during extraction, persistent log after 
   - Key metrics grid (document size, sections found, rules found/unique)
   - Section titles identified (as chips)
   - Processing timeline showing all four stages with status badges
-  - Full event log with timestamps
+  - Full event log with timestamps (auto-scrolls to latest entry)
 - Error state: red border, warning icon, error message
 - Starts collapsed by default — useful on step 1 where it acts as an audit trail
 
@@ -381,6 +381,7 @@ LangGraph `StateGraph` with four nodes and two execution modes:
 - `_worker_extract` uses `logger.exception()` — full traceback written to log file on any LLM or parse failure
 - `_orchestrate_extraction` counts failed workers and includes the count in `extraction_complete` event data (`failed_segments` field) and in the event message
 - `_emit()` logs every SSE event at DEBUG level: `[SSE] event_type | stage | message` — enable with `LOG_LEVEL=DEBUG`
+- Per-segment extraction shows two events: "Processing 'Section X'..." at start, then "Processed 'Section X' → N rules extracted" on completion, enabling timing visibility
 
 **Event emission**: `_emit()` calls `asyncio.Queue.put_nowait()` — non-blocking, safe from both sync and async nodes
 

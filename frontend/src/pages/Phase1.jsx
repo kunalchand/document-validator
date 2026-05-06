@@ -6,12 +6,14 @@ import {
   Box,
   Stepper,
   Step,
-  StepLabel
+  StepLabel,
+  Alert
 } from '@mui/material'
 import { DocumentUploadForm } from '../components/DocumentUploadForm'
 import { RulesList } from '../components/RulesList'
 import { ReadyForAudit } from '../components/ReadyForAudit'
-import { DUMMY_EXTRACTED_RULES } from '../constants/dummyRules'
+import ExtractionProgress from '../components/ExtractionProgress'
+import { documentService } from '../services/documentService'
 
 const PHASE_STEPS = [
   { label: 'Upload Rules Document', description: 'Provide the rules document' },
@@ -23,19 +25,32 @@ export const Phase1 = () => {
   const [activeStep, setActiveStep] = useState(0)
   const [rules, setRules] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [extractionEvents, setExtractionEvents] = useState([])
+  const [extractionError, setExtractionError] = useState(null)
 
   const handleDocumentSubmit = async (payload) => {
     setLoading(true)
-    try {
-      // TODO: Replace with actual API call when backend is ready
-      // For now, using dummy data to demonstrate the flow
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+    setExtractionEvents([])
+    setExtractionError(null)
 
-      // Simulate API response with dummy data
-      setRules([...DUMMY_EXTRACTED_RULES.rules])
-      setActiveStep(1)
+    try {
+      const events = []
+
+      await documentService.extractRulesStream(payload, (event) => {
+        events.push(event)
+        setExtractionEvents([...events])
+
+        if (event.event_type === 'finalization_complete' && event.data?.extracted_rules) {
+          setRules(event.data.extracted_rules)
+          setActiveStep(1)
+        }
+
+        if (event.event_type === 'error') {
+          setExtractionError(event.message)
+        }
+      })
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to extract rules')
+      setExtractionError(error.message || 'Failed to extract rules')
     } finally {
       setLoading(false)
     }
@@ -90,13 +105,29 @@ export const Phase1 = () => {
 
       <Paper elevation={2} sx={{ p: 4 }}>
         {activeStep === 0 && (
-          <DocumentUploadForm
-            title="Upload Rules Document"
-            description="Upload or paste the document containing the rules that will be used to validate other documents. This can be a PDF, DOCX file, or raw text."
-            onSubmit={handleDocumentSubmit}
-            submitButtonText="Extract Rules"
-            phase="phase1"
-          />
+          <Box>
+            {loading && extractionEvents.length > 0 && (
+              <Box sx={{ mb: 4 }}>
+                <ExtractionProgress events={extractionEvents} />
+              </Box>
+            )}
+
+            {extractionError && (
+              <Alert severity="error" sx={{ mb: 3 }}>
+                {extractionError}
+              </Alert>
+            )}
+
+            {!loading && (
+              <DocumentUploadForm
+                title="Upload Rules Document"
+                description="Upload or paste the document containing the rules that will be used to validate other documents. This can be a PDF, DOCX file, or raw text."
+                onSubmit={handleDocumentSubmit}
+                submitButtonText="Extract Rules"
+                phase="phase1"
+              />
+            )}
+          </Box>
         )}
 
         {activeStep === 1 && rules && (

@@ -4,13 +4,14 @@
 A document compliance verification system. Takes a rules document and a user document, extracts structured rules from the former, and evaluates the latter against those rules — producing a structured compliance report with pass/fail status and supporting evidence per rule.
 
 ## Tech Stack
-| Layer      | Technology                           |
-|------------|--------------------------------------|
-| Frontend   | React.js 18 + Vite + Material UI 5   |
-| Backend    | Python (FastAPI)                     |
-| Pipeline   | LangGraph                            |
-| LLM        | OpenAI (via LangChain)               |
-| Vector DB  | TBD (Chroma / FAISS / Pinecone)      |
+| Layer      | Technology                                        |
+|------------|---------------------------------------------------|
+| Frontend   | React.js 18 + Vite + Material UI 5 + React Router |
+| Backend    | Python (FastAPI)                                  |
+| Pipeline   | LangGraph                                         |
+| LLM        | Provider-agnostic (dummy / OpenAI / Anthropic / Google / Grok) |
+| Streaming  | Server-Sent Events (sse-starlette)                |
+| Vector DB  | TBD (Chroma / FAISS / Pinecone) — Phase 2         |
 
 ## Architecture
 
@@ -23,6 +24,7 @@ The backend processes documents in two separate API calls:
 - Fan-out: parallel LLM workers extract structured rule objects per section
 - Fan-in: aggregate, deduplicate, validate
 - Output: structured JSON list of rules
+- Progress: streamed in real-time via SSE
 
 **Phase 2 — Audit / Compliance Check**
 - Input: user document + extracted rules from Phase 1
@@ -32,10 +34,13 @@ The backend processes documents in two separate API calls:
 - Output: structured JSON report (rule ID, status, reasoning, evidence)
 
 ### API Endpoints
-| Method | Path              | Description                        |
-|--------|-------------------|------------------------------------|
-| POST   | `/extract-rules`  | Phase 1 — extract rules from document |
-| POST   | `/audit`          | Phase 2 — audit document against rules |
+| Method | Path                          | Description                                      |
+|--------|-------------------------------|--------------------------------------------------|
+| GET    | `/`                           | Root health check                                |
+| GET    | `/health`                     | Application health status                        |
+| POST   | `/api/v1/extract-rules`       | Phase 1 — extract rules (returns JSON on completion) |
+| POST   | `/api/v1/extract-rules-stream`| Phase 1 — extract rules with SSE progress stream |
+| POST   | `/api/v1/audit`               | Phase 2 — audit document against rules (placeholder) |
 
 ## Folder Structure
 ```
@@ -51,18 +56,23 @@ document-validator/
 │   │   │   ├── RuleCard.jsx            # Individual rule card with inline editing
 │   │   │   ├── RulesList.jsx           # List of rules with search/filter
 │   │   │   ├── ReadyForAudit.jsx       # Phase 1 completion screen
-│   │   │   └── ConfirmationDialog.jsx  # Reusable confirmation modal
+│   │   │   ├── ConfirmationDialog.jsx  # Reusable confirmation modal
+│   │   │   └── ExtractionProgress.jsx  # Real-time SSE progress display
 │   │   ├── pages/
-│   │   │   └── Phase1.jsx              # Three-step flow: Upload → Review → Ready
+│   │   │   ├── Phase1.jsx              # Three-step flow: Upload → Review → Ready
+│   │   │   └── ExtractionProgressDemo.jsx  # Interactive component demo page
 │   │   ├── services/
 │   │   │   ├── apiClient.js            # Axios client with interceptors
 │   │   │   └── documentService.js      # API methods (extract-rules, audit)
 │   │   ├── utils/
-│   │   │   └── fileValidator.js        # File and text validation helpers
+│   │   │   ├── fileValidator.js        # File and text validation helpers
+│   │   │   └── extractionSimulator.js  # SSE event stream simulator for demo/testing
+│   │   ├── types/
+│   │   │   └── extraction.ts           # TypeScript interfaces for SSE event schema
 │   │   ├── constants/
 │   │   │   ├── documentTypes.js        # File types, sizes, formats
 │   │   │   └── dummyRules.js           # Sample extracted rules (for development)
-│   │   ├── App.jsx                     # Root component with Material UI theme
+│   │   ├── App.jsx                     # Root component with Router + MUI theme
 │   │   └── main.jsx                    # React entry point
 │   ├── index.html                      # HTML entry
 │   ├── vite.config.js                  # Vite configuration with API proxy
@@ -81,25 +91,40 @@ document-validator/
 │   │   ├── api/                        # REST API layer (v1 routing)
 │   │   │   └── v1/
 │   │   │       ├── endpoints/
-│   │   │       │   ├── rules.py        # POST /extract-rules endpoint
-│   │   │       │   ├── audit.py        # POST /audit endpoint
+│   │   │       │   ├── rules.py        # POST /extract-rules (sync JSON response)
+│   │   │       │   ├── stream.py       # POST /extract-rules-stream (SSE response)
+│   │   │       │   ├── audit.py        # POST /audit (Phase 2 placeholder)
 │   │   │       │   └── __init__.py
 │   │   │       ├── schemas.py          # Pydantic request/response models
 │   │   │       └── __init__.py
 │   │   ├── providers/                  # Provider abstraction layer
 │   │   │   ├── base.py                 # Abstract base classes (LLMProvider, EmbeddingProvider)
-│   │   │   ├── schemas.py              # Standardized request/response models
-│   │   │   ├── factory.py              # Provider factory pattern
-│   │   │   ├── dummy_provider.py       # Mock implementations for testing
+│   │   │   ├── schemas.py              # Standardized LLMRequest/Response, EmbeddingRequest/Response
+│   │   │   ├── factory.py              # Provider factory (ProviderType enum + ProviderFactory)
+│   │   │   ├── dummy_provider.py       # Mock LLM/embedding — returns JSON for extraction prompts
 │   │   │   ├── README.md               # Detailed provider documentation
 │   │   │   ├── PROVIDER_TEMPLATE.md    # How to add new providers
+│   │   │   └── __init__.py
+│   │   ├── parsers/                    # Document parsers
+│   │   │   ├── base.py                 # Abstract DocumentParser base class
+│   │   │   ├── pdf_parser.py           # PDFParser — text extraction via PyPDF2
+│   │   │   ├── docx_parser.py          # DOCXParser — text extraction via python-docx
+│   │   │   ├── text_parser.py          # TextParser — passthrough for plain text
+│   │   │   └── __init__.py
+│   │   ├── agents/                     # Agent logic and schemas
+│   │   │   ├── schemas.py              # DocumentSegment, RuleCandidate (Pydantic)
+│   │   │   ├── nodes.py                # Pure functions: segment_text, build_extraction_prompt,
+│   │   │   │                           #   parse_llm_response, deduplicate_rules
+│   │   │   ├── events.py               # SSE event schema: ExtractionEvent, ExtractionEventType,
+│   │   │   │                           #   ExtractionStage, ExtractionProgress, ExtractionEventData
+│   │   │   └── __init__.py
+│   │   ├── pipeline/                   # LangGraph graph definitions
+│   │   │   ├── phase1_state.py         # Phase1State TypedDict (LangGraph state)
+│   │   │   ├── phase1_graph.py         # Phase1Pipeline: LangGraph graph + run() + stream()
 │   │   │   └── __init__.py
 │   │   ├── utils/
 │   │   │   ├── validators.py           # Input validation logic
 │   │   │   └── __init__.py
-│   │   ├── agents/                     # LangGraph agents and nodes (Phase 2)
-│   │   ├── parsers/                    # Document parsers (PDF, DOCX) (Phase 2)
-│   │   ├── pipeline/                   # LangGraph graph definitions (Phase 2)
 │   │   ├── constants/                  # App-wide constants
 │   │   └── __init__.py
 │   ├── tests/                          # Backend tests (coming soon)
@@ -124,7 +149,7 @@ Three-step user flow with Material UI components:
 - Text input area with character limit tracking
 - Supports PDF, DOCX, and raw text
 - Max file size: 10MB, max text: 50,000 characters
-- Currently uses dummy data (ready for API integration)
+- Currently uses dummy data (ready for API integration via SSE stream)
 
 **Step 2: Review & Confirm**
 - Displays extracted rules in card-based UI
@@ -144,28 +169,59 @@ Three-step user flow with Material UI components:
 - "Back to Review" button (returns to step 2)
 - "Proceed to Phase 2: Audit Document" button (TODO: navigate to Phase 2)
 
+### ExtractionProgress Component
+Real-time SSE progress display for the Phase 1 extraction pipeline.
+
+**Features**:
+- Receives `events` prop — array of `ExtractionEvent` objects
+- Collapsible card with current stage name and overall progress bar
+- Segment-level progress text (e.g., "Segment 3 of 7 • 12 rules found so far")
+- Color-coded stages: parsing (blue) / segmentation (orange) / extraction (purple) / finalization (green)
+- Animated spinning icon for the active stage, checkmark for completed stages
+- **Expandable details panel** shows:
+  - Key metrics grid (document size, sections found, rules found/unique)
+  - Section titles identified (as chips)
+  - Processing timeline showing all four stages with status badges
+  - Full event log with timestamps
+- Error state: red border, warning icon, error message
+
+**Demo**: `http://localhost:5173/demo/extraction-progress`
+- Run Success Scenario — realistic full pipeline simulation (~18 seconds)
+- Run Error Scenario — failure handling demonstration
+
+### Routing
+React Router v6 with two routes:
+- `/` → `Phase1` page (main application flow)
+- `/demo/extraction-progress` → `ExtractionProgressDemo` page
+
 ### Component Architecture
 - **DocumentUploadForm**: Reusable component accepting `phase` prop for multi-phase support
 - **RuleCard**: Editable rule with expand/collapse for conditions and evidence
 - **RulesList**: Stateful list with search, filter, and CRUD operations
-- **ConfirmationDialog**: Reusable modal for destructive actions (can be used anywhere)
-- Material UI theme applied globally (customizable primary/secondary colors)
+- **ConfirmationDialog**: Reusable modal for destructive actions
+- **ExtractionProgress**: Real-time SSE event display with collapsible details
+- Material UI theme applied globally via `ThemeProvider`
 
 ### Services & Utilities
 - **apiClient.js**: Axios instance with baseURL and error interceptor
-- **documentService.js**: Methods for `/extract-rules` and `/audit` endpoints (ready to connect to backend)
+- **documentService.js**: Methods for `/extract-rules` and `/audit` endpoints
 - **fileValidator.js**: Validation for file type, size, and text length
 - **documentTypes.js**: Constants for MIME types, extensions, limits
+- **extractionSimulator.js**: Async generator functions for UI demo/testing without backend
 
-### Development Data
-- **dummyRules.js**: 5 sample rules (Employee Background Check, Data Confidentiality, etc.) with realistic structure
-- Allows full testing of UI without backend; easily replaced with API calls
+### TypeScript Types
+- **types/extraction.ts**: Full TypeScript interface definitions for the SSE event schema
+  - `ExtractionEvent` — top-level event interface (matches Python `ExtractionEvent` Pydantic model)
+  - `ExtractionEventType` — union of all 10 valid event type strings
+  - `ExtractionStage` — pipeline stage union
+  - `ExtractionProgress` — `current`, `total`, `percent`
+  - `ExtractionEventData` — all contextual data fields
 
 ### Build & Run
 ```bash
 cd frontend
 npm install
-npm run dev              # Runs on http://localhost:3000
+npm run dev              # Runs on http://localhost:5173
 npm run build           # Production build
 ```
 
@@ -177,60 +233,25 @@ Vite config includes proxy to `http://localhost:8000` for seamless API calls.
 
 **Framework**: FastAPI with automatic Swagger/OpenAPI documentation
 
-**Key Features**:
-- Automatic interactive API documentation at `/docs` (Swagger UI) and `/redoc` (ReDoc)
-- CORS middleware for frontend integration
-- Structured error handling with custom exceptions
-- Environment-based configuration (development/production)
-- Structured logging throughout
-
 **Endpoints Implemented**:
 - `GET /` - Root health check
 - `GET /health` - Application health status
-- `POST /api/v1/extract-rules` - Extract rules from document (Phase 1)
+- `POST /api/v1/extract-rules` - Extract rules, returns `ExtractRulesResponse` on completion
+- `POST /api/v1/extract-rules-stream` - Extract rules with SSE progress streaming
 - `POST /api/v1/audit` - Audit document against rules (Phase 2 placeholder)
 
-**Request/Response Models** (Pydantic schemas):
-- `ExtractRulesResponse`: Returns extracted rules with metadata
-- `Rule`: Individual rule object (id, title, description, conditions, evidence, severity)
-- `AuditResponse`: Audit results per rule with compliance score
-- `ErrorResponse`: Standardized error format
+**Request/Response Models** (`app/api/v1/schemas.py`):
+- `Rule`: id, title, description, conditions[], expected_evidence[], section, severity, status
+- `ExtractRulesResponse`: document_id, total_rules, rules[], extraction_timestamp, status
+- `AuditResultRule`: rule_id, rule_title, status, confidence, reasoning, evidence[]
+- `AuditResponse`: document_id, total/passed/failed rules, compliance_score, results[], audit_timestamp
+- `ErrorResponse`: status, message, detail
 
 **Core Components**:
-
-1. **Configuration** (`config.py`):
-   - Pydantic BaseSettings for environment variables
-   - App settings: API keys, file limits, CORS origins
-   - LRU cache for singleton Settings instance
-
-2. **Core Utilities**:
-   - **logger.py**: Structured logging with configurable levels (DEBUG/INFO/WARNING/ERROR)
-   - **exceptions.py**: Custom exception hierarchy for domain-specific errors
-     - `InvalidInputException` (400)
-     - `FileParseFailed` (422)
-     - `ExtractionFailed` (500)
-     - `AuditFailed` (500)
-
-3. **Input Validation** (`utils/validators.py`):
-   - File upload validation (type, size)
-   - Text input validation (empty, length limits)
-   - Reusable validator functions
-
-4. **API Endpoints**:
-   - **rules.py**: `/extract-rules` endpoint
-     - Accepts file upload (PDF/DOCX) or text input
-     - Returns structured rules with conditions and evidence
-     - Placeholder for actual LangGraph agent integration
-   - **audit.py**: `/audit` endpoint
-     - Accepts document + rules JSON
-     - Returns audit results with compliance score
-     - Placeholder for RAG agent integration
-
-**Current Implementation**:
-- API layer fully functional with dummy data for testing
-- Proper error handling and validation in place
-- Ready for integration with agentic layer (LangGraph)
-- Vite proxy routes all `/api` calls to `http://localhost:8000`
+1. **Configuration** (`config.py`): Pydantic BaseSettings, LRU-cached singleton
+2. **Logging** (`core/logger.py`): Structured logging, configurable level
+3. **Exceptions** (`core/exceptions.py`): `InvalidInputException` (400), `FileParseFailed` (422), `ExtractionFailed` (500), `AuditFailed` (500)
+4. **Validation** (`utils/validators.py`): `validate_file()`, `validate_text()`
 
 **Build & Run**:
 ```bash
@@ -245,130 +266,143 @@ Access Swagger at `http://localhost:8000/docs`
 
 **Pattern**: Abstract Factory with Python ABC (Abstract Base Classes)
 
-**Purpose**: Provider-agnostic LLM and embedding integration. Supports any provider (OpenAI, Anthropic, Google, xAI) without code changes.
-
 **Core Architecture**:
+1. **`app/providers/base.py`**: `LLMProvider` and `EmbeddingProvider` ABCs
+2. **`app/providers/schemas.py`**: `LLMRequest`/`LLMResponse`, `EmbeddingRequest`/`EmbeddingResponse`
+3. **`app/providers/factory.py`**: `ProviderFactory` with `ProviderType` enum (DUMMY, OPENAI, ANTHROPIC, GOOGLE, GROK)
+4. **`app/providers/dummy_provider.py`**: `DummyLLMProvider` — detects extraction prompts and returns realistic JSON rule candidates; `DummyEmbeddingProvider` — returns fixed-dimension float vectors
 
-1. **Abstract Base Classes** (`app/providers/base.py`):
-   - `LLMProvider` - Interface for language models
-     - `async generate(request)` - Generate text
-     - `async batch_generate(requests)` - Batch processing
-     - `provider_name` - Provider identifier
-     - `available_models` - List of supported models
-   - `EmbeddingProvider` - Interface for embeddings
-     - `async embed(request)` - Generate embeddings
-     - `async batch_embed(requests)` - Batch embeddings
-     - `embedding_dimension` - Vector size
-     - `available_models` - List of models
+**Pending**: Concrete implementations for OPENAI, ANTHROPIC, GOOGLE, GROK (only DUMMY is active; factory raises `ValueError` for others until implemented)
 
-2. **Standardized Data Models** (`app/providers/schemas.py`):
-   - `LLMRequest` / `LLMResponse` - Type-safe LLM communication
-   - `EmbeddingRequest` / `EmbeddingResponse` - Type-safe embeddings
-   - Pydantic validation ensures data integrity
-
-3. **Implementations**:
-   - **DummyLLMProvider** & **DummyEmbeddingProvider** - Mock implementations for testing (no API calls)
-   - **Planned**: OpenAIProvider, AnthropicProvider, GoogleProvider, etc.
-
-4. **Factory Pattern** (`app/providers/factory.py`):
-   - `ProviderFactory.create_llm_provider()` - Create LLM provider instance
-   - `ProviderFactory.create_embedding_provider()` - Create embedding provider instance
-   - `ProviderFactory.register_*_provider()` - Runtime provider registration
-   - `ProviderType` enum - Supported provider types
-
-**Configuration** (Environment Variables):
+**Configuration**:
 ```env
-# Use dummy for development
-LLM_PROVIDER=dummy
+LLM_PROVIDER=dummy        # dummy | openai | anthropic | google | grok
+LLM_API_KEY=              # API key for chosen provider
+LLM_MODEL=dummy-model     # Model identifier for chosen provider
 EMBEDDING_PROVIDER=dummy
-
-# Switch to OpenAI in production
-LLM_PROVIDER=openai
-LLM_API_KEY=sk-...
-LLM_MODEL=gpt-4
-
-EMBEDDING_PROVIDER=openai
-EMBEDDING_API_KEY=sk-...
-EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=dummy-embedding
 ```
 
-**Usage Example**:
+### Agentic Layer (Phase 1 - Implemented)
+
+#### Document Parsers (`app/parsers/`)
+- **`base.py`**: Abstract `DocumentParser` with `parse(content) -> str` and `supported_formats` property
+- **`pdf_parser.py`**: `PDFParser` — extracts text page-by-page via PyPDF2
+- **`docx_parser.py`**: `DOCXParser` — extracts paragraphs via python-docx
+- **`text_parser.py`**: `TextParser` — passthrough, decodes bytes if needed
+
+#### Agent Schemas (`app/agents/schemas.py`)
+- **`DocumentSegment`**: index, title, content, char_count
+- **`RuleCandidate`**: title, description, conditions[], expected_evidence[], severity, section, source_segment_index
+
+#### Agent Nodes (`app/agents/nodes.py`)
+Pure helper functions used by the pipeline nodes:
+- **`segment_text(text, max_chars=3000)`**: Splits on section headings (numbered, ALL-CAPS, markdown, Article/Section/Chapter patterns), falls back to paragraph-boundary chunking
+- **`build_extraction_prompt(segment)`**: Formats the structured JSON-extraction prompt for the LLM
+- **`parse_llm_response(content, segment_index)`**: Strips markdown fences, extracts JSON array, validates and constructs `RuleCandidate` objects
+- **`deduplicate_rules(candidates)`**: Removes duplicates by normalized title
+
+#### SSE Event Schema (`app/agents/events.py`)
+Pydantic models that mirror the TypeScript types in `frontend/src/types/extraction.ts`:
+- **`ExtractionEventType`** (str Enum): `parsing_started`, `parsing_complete`, `segmentation_started`, `segmentation_complete`, `extraction_started`, `extraction_progress`, `extraction_complete`, `finalization_started`, `finalization_complete`, `error`
+- **`ExtractionStage`** (str Enum): `parsing`, `segmentation`, `extraction`, `finalization`
+- **`ExtractionProgress`**: current, total, percent
+- **`ExtractionEventData`**: char_count, page_count, section_count, section_titles, segment_index, segment_title, rules_in_segment, total_rules_so_far, total_rules, unique_rules, extracted_rules (only in `finalization_complete`)
+- **`ExtractionEvent`**: event_type, stage, message, progress, data, timestamp, event_id
+
+#### LangGraph State (`app/pipeline/phase1_state.py`)
 ```python
-from app.providers import ProviderFactory, LLMRequest
-
-# Create provider (config determines which)
-provider = ProviderFactory.create_llm_provider(
-    provider_type=settings.llm_provider,
-    api_key=settings.llm_api_key,
-    config={"model": settings.llm_model}
-)
-
-# Use identically regardless of implementation
-response = await provider.generate(
-    LLMRequest(prompt="Your prompt")
-)
+class Phase1State(TypedDict):
+    input_type: str                          # "pdf" | "docx" | "text"
+    raw_file_bytes: Optional[bytes]
+    raw_filename: Optional[str]
+    raw_text: Optional[str]
+    parsed_text: Optional[str]
+    segments: List[DocumentSegment]
+    rule_candidates: List[RuleCandidate]
+    extracted_rules: List[dict]
+    errors: Annotated[List[str], operator.add]   # accumulated warnings
 ```
 
-**Benefits**:
-- ✓ Switch providers via config (no code changes)
-- ✓ Testable with dummy provider
-- ✓ Extensible for new providers
-- ✓ SOLID principles (Dependency Inversion, Open/Closed)
-- ✓ Type-safe with Pydantic validation
-- ✓ Async-first design
+#### Phase1Pipeline (`app/pipeline/phase1_graph.py`)
+LangGraph `StateGraph` with four nodes and two execution modes:
 
-**Documentation**: See `app/providers/README.md` for detailed guide and `app/providers/PROVIDER_TEMPLATE.md` for adding new providers.
+**Graph flow**: `parse_input → segment_content → orchestrate_extraction → finalize_rules`
 
-### Agentic Layer (Phase 2 - LangGraph)
+**Nodes**:
+- `parse_input`: Routes to the correct parser; emits `parsing_started`, `parsing_complete`
+- `segment_content`: Calls `segment_text()`; emits `segmentation_started`, `segmentation_complete` (with section count and titles)
+- `orchestrate_extraction`: Dispatches `asyncio.gather` fan-out of worker tasks; emits `extraction_started`, one `extraction_progress` per segment (with `asyncio.Lock` for safe concurrent counter), `extraction_complete`
+- `finalize_rules`: Deduplicates, assigns `rule_NNN` IDs; emits `finalization_started`, `finalization_complete` (with full `extracted_rules` list in event data)
 
-*Coming in next phase*
+**Event emission**: `_emit_event()` calls `asyncio.Queue.put_nowait()` — non-blocking, safe from both sync and async nodes
 
-The agentic layer will be built in:
-- `app/agents/` - LangGraph agents and nodes
-- `app/parsers/` - Document parsers (PDF, DOCX, text)
-- `app/pipeline/` - LangGraph graph definitions for rules extraction and audit
+**`run()` method**: Standard async call returning `list[dict]` when complete (used by `/extract-rules` endpoint)
 
-This layer will handle:
-- Document parsing and normalization
-- LLM-powered rules extraction (using provider abstraction)
-- Vector DB embedding and retrieval (using provider abstraction)
-- RAG-based rule evaluation
+**`stream()` method**: Async generator using `asyncio.Queue` + `asyncio.create_task` pattern. Pipeline runs as a background task; `stream()` drains the queue and yields `ExtractionEvent` objects. A sentinel (`_STREAM_DONE`) signals end of stream. Used by `/extract-rules-stream` endpoint.
+
+### SSE Streaming Endpoint (`app/api/v1/endpoints/stream.py`)
+
+**`POST /api/v1/extract-rules-stream`**
+
+Key design decisions:
+- Input validation and file reading happen **before** `EventSourceResponse` is returned, so invalid inputs return standard HTTP 400/422 JSON (not SSE error events)
+- `Last-Event-ID` header is read for SSE spec compliance; event IDs are sequential integers
+- `retry: 5000ms` sent with every event (browser reconnect interval)
+- Each event frame: `event=<event_type>`, `id=<sequential_int>`, `data=<ExtractionEvent JSON>`, `retry=5000`
+- Pipeline errors after the stream opens are delivered as `error` SSE events
+- Final `finalization_complete` event carries the complete `extracted_rules` list — frontend reads rules from this event without a separate API call
+
+**Frontend consumption** (since `EventSource` only supports GET, file uploads use `fetch()`):
+```javascript
+const response = await fetch('/api/v1/extract-rules-stream', {
+  method: 'POST',
+  body: formData,
+})
+const reader = response.body.getReader()
+// Read chunks, split on '\n', parse lines starting with 'data: '
+// Final event (finalization_complete) contains event.data.extracted_rules
+```
 
 ## Key Design Decisions
 
 **Backend**:
 - Rules extraction is a deterministic structuring problem — no vector DB in Phase 1
 - Vector DB is used only for the user document in Phase 2
-- Map-reduce (fan-out / fan-in) pattern for both rule extraction and rule evaluation
+- Map-reduce (fan-out / fan-in) with `asyncio.gather` for parallel per-segment LLM calls
 - Stateless between API calls — rules are passed explicitly by the client
 - No LangGraph interrupts or checkpointing in v1 (kept simple intentionally)
-- All three input types (PDF, DOCX, raw text) are normalized to plain text before pipeline entry
-- **Provider-agnostic LLM integration** — Abstract factory pattern allows switching between OpenAI, Anthropic, Google, etc. without code changes
-- Generic configuration (LLM_PROVIDER, EMBEDDING_PROVIDER) not hardcoded to any single provider
-- Dummy provider for testing/development without API dependencies
+- All three input types (PDF, DOCX, raw text) normalized to plain text before pipeline entry
+- **Provider-agnostic LLM integration** — abstract factory, config-driven, no vendor lock-in
+- **Two endpoint modes**: `/extract-rules` (sync JSON) and `/extract-rules-stream` (SSE) — same pipeline, different execution paths (`run()` vs `stream()`)
+- **Circular import prevention**: pipeline layer (`app/pipeline/`) never imports from API layer (`app/api/`); pipeline returns `list[dict]`, API layer owns Pydantic conversion
+- `sse-starlette==1.6.5` pinned for compatibility with FastAPI 0.104.1 (starlette<0.28, anyio<4)
 
 **Frontend**:
-- Frontend components are phase-agnostic where possible (DocumentUploadForm, ConfirmationDialog)
-- Material UI used for consistent, professional styling and accessibility
-- Dummy data approach allows full frontend development without backend dependency
+- `ExtractionProgress` component is driven entirely by an `events` prop — no internal fetching, making it reusable and fully testable with the simulator
+- `EventSource` not used for SSE because it only supports GET; file uploads require POST with `fetch()` + `ReadableStream`
+- SSE event schema is defined in both Python (Pydantic) and TypeScript (interfaces) to keep the contract explicit and type-safe on both ends
+- React Router added to support the demo route without affecting the main application flow
+- Simulator (`extractionSimulator.js`) uses async generator pattern, mirroring the backend's `stream()` async generator — the frontend component works identically with simulated or real events
 
 ## Standards & Conventions
 
 **Backend**:
-- SOLID principles throughout (Dependency Inversion, Open/Closed, Single Responsibility, etc.)
-- Abstract Factory pattern for provider abstraction (enables easy provider switching)
-- Structured logging with appropriate log levels (DEBUG / INFO / WARNING / ERROR)
+- SOLID principles throughout (Dependency Inversion, Open/Closed, Single Responsibility)
+- Abstract Factory pattern for provider abstraction
+- Structured logging with appropriate levels (DEBUG / INFO / WARNING / ERROR)
 - Consistent HTTP error responses: `{ status, message, detail }`
-- All secrets and config via environment variables — never hardcoded
-- Type-safe with Pydantic validation for all requests/responses
-- Generic LLM provider configuration (not OpenAI-specific)
-- Async-first design for scalability
+- All secrets via environment variables — never hardcoded
+- Type-safe with Pydantic validation for all requests/responses and SSE events
+- Async-first design; pipeline nodes emit via `put_nowait` (non-blocking)
 
 **Frontend & General**:
-- SOLID principles throughout frontend and backend
+- SOLID principles throughout
 - `.env` files excluded from version control; `.env.example` documents required variables
 - No directional icons (arrows) on buttons — text labels speak for themselves
 - Confirmation dialogs for destructive actions (data loss, deletion)
+- Component props are the single source of truth — no hidden internal API calls in display components
 
 ## Environment Variables
 
@@ -391,28 +425,27 @@ This layer will handle:
 ## Next Steps
 
 ### Backend (Priority)
-- Implement LangGraph agents for rules extraction pipeline
-- Implement document parsers for PDF and DOCX files
-- Set up vector database (Chroma / FAISS / Pinecone)
-- Implement RAG-based audit pipeline
-- Connect agentic layer to API endpoints
+1. **Implement a concrete LLM provider** (OpenAI, Anthropic, Google, or Grok) to replace the dummy provider for production rule extraction — add provider file, register in factory, update `.env`
+2. Set up vector database (Chroma / FAISS / Pinecone) for Phase 2
+3. Implement Phase 2 RAG-based audit pipeline (`app/agents/`, `app/pipeline/`)
+4. Write test suite (`backend/tests/`)
 
-### Frontend
-- Build Phase 2 frontend (Audit Document upload and results view)
-- Connect frontend services to live backend (replace dummy data)
-- Add user feedback via toast notifications (Snackbar)
-- Add progress indicators for async operations
+### Frontend (Priority)
+1. **Connect Phase 1 upload flow to the SSE endpoint** — replace dummy data in `Phase1.jsx` with a real `fetch()` call to `/api/v1/extract-rules-stream`, render `ExtractionProgress` during extraction, then hand rules to `RulesList`
+2. Build Phase 2 frontend (Audit Document upload and results view)
+3. Add user feedback via toast notifications (Snackbar) for non-critical events
+4. Add error recovery UI (retry button when extraction fails)
 
 ### Integration
-- Test end-to-end flow between frontend and backend
-- Performance optimization and tuning
+- End-to-end test: upload a real PDF, verify rules extracted and displayed correctly
+- Performance tuning (LLM concurrency, segment size)
 - Comprehensive test coverage (unit, integration)
 
 ## Future Improvements
-- Persistent storage for extracted rules
+- Persistent storage for extracted rules (session or DB)
 - Human-in-the-loop review via LangGraph checkpointing
 - Citations linking rules to specific evidence passages
-- Real-time progress updates (WebSocket or SSE)
 - Full compliance dashboard with visual reporting
 - Export rules and reports (PDF, CSV)
 - Bulk rule management (import/export)
+- Phase 2 SSE streaming for audit progress

@@ -5,6 +5,13 @@ from app.agents.nodes import (
     parse_llm_response,
     deduplicate_rules,
 )
+from app.agents.events import (
+    ExtractionEvent,
+    ExtractionEventType,
+    ExtractionStage,
+    ExtractionProgress,
+    ExtractionEventData,
+)
 
 __all__ = [
     "DocumentSegment",
@@ -13,4 +20,9 @@ __all__ = [
     "build_extraction_prompt",
     "parse_llm_response",
     "deduplicate_rules",
+    "ExtractionEvent",
+    "ExtractionEventType",
+    "ExtractionStage",
+    "ExtractionProgress",
+    "ExtractionEventData",
 ]

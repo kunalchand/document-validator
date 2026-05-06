@@ -1,6 +1,8 @@
 import React from 'react'
 import { CssBaseline, ThemeProvider, createTheme, Box } from '@mui/material'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { Phase1 } from './pages/Phase1'
+import ExtractionProgressDemo from './pages/ExtractionProgressDemo'
 
 const theme = createTheme({
   palette: {
@@ -21,12 +23,17 @@ const theme = createTheme({
 
 export const App = () => {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
-        <Phase1 />
-      </Box>
-    </ThemeProvider>
+    <Router>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
+          <Routes>
+            <Route path="/" element={<Phase1 />} />
+            <Route path="/demo/extraction-progress" element={<ExtractionProgressDemo />} />
+          </Routes>
+        </Box>
+      </ThemeProvider>
+    </Router>
   )
 }
 

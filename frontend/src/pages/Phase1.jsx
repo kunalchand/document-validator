@@ -64,12 +64,14 @@ export const Phase1 = () => {
         }
 
         if (event.event_type === 'error') {
+          setExtractionEvents([])
           setExtractionError(event.message)
           showNotification(`Extraction failed: ${event.message}`, 'error')
         }
       })
     } catch (error) {
       const msg = error.message || 'Failed to extract rules'
+      setExtractionEvents([])
       setExtractionError(msg)
       showNotification(msg, 'error')
     } finally {

@@ -55,6 +55,7 @@ class Phase1Pipeline:
 
     def _emit(self, event: ExtractionEvent) -> None:
         """Put an event into the queue (non-blocking, safe from sync or async context)."""
+        logger.debug(f"[SSE] {event.event_type} | {event.stage} | {event.message}")
         if self._event_queue is not None:
             self._event_queue.put_nowait(event)
 

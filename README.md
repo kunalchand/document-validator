@@ -10,6 +10,56 @@ Upload a rules document (PDF, DOCX, or plain text). The backend segments it, sen
 **Phase 2 — Audit** *(coming soon)*
 Upload a user document and run it against the confirmed rules. Each rule is evaluated using RAG (retrieval-augmented generation) — evidence passages are retrieved from a vector DB and passed to the LLM for a pass/fail decision.
 
+## Phase 1 Pipeline Architecture
+
+The Phase 1 extraction pipeline is built on **LangGraph** as four sequential nodes — `parse_input`, `segment_content`, `orchestrate_extraction`, `finalize_rules` — and uses an **orchestrator-worker** pattern: `orchestrate_extraction` fans out per-segment LLM calls in parallel via `asyncio.gather`, then `finalize_rules` aggregates the candidates. Every node also emits **Server-Sent Events** to the client in real-time, so the UI sees progress as it happens.
+
+```mermaid
+graph TD
+    Start([Client uploads document]) --> Parse
+
+    subgraph LangGraph["LangGraph StateGraph"]
+        Parse[<b>parse_input</b><br/><i>Router</i><br/>Routes to PDF / DOCX / Text parser]
+        Segment[<b>segment_content</b><br/><i>Segmenter</i><br/>Splits text into N sections]
+        Orchestrate[<b>orchestrate_extraction</b><br/><i>Orchestrator</i><br/>asyncio.gather fan-out]
+        Finalize[<b>finalize_rules</b><br/><i>Synthesizer</i><br/>Dedupe + assign rule IDs]
+
+        Parse --> Segment --> Orchestrate
+        Orchestrate --> Finalize
+    end
+
+    subgraph Workers["Per-segment workers"]
+        W1[Worker 1<br/>LLM call]
+        W2[Worker 2<br/>LLM call]
+        Wn[Worker N<br/>LLM call]
+    end
+
+    Orchestrate -.spawn.-> W1
+    Orchestrate -.spawn.-> W2
+    Orchestrate -.spawn.-> Wn
+    W1 -.candidates.-> Finalize
+    W2 -.candidates.-> Finalize
+    Wn -.candidates.-> Finalize
+
+    Finalize --> End([Final SSE event<br/>contains extracted_rules])
+
+    Parse -.SSE event.-> Client[(Browser SSE stream)]
+    Segment -.SSE event.-> Client
+    Orchestrate -.SSE per worker.-> Client
+    Finalize -.SSE event.-> Client
+```
+
+Each node's role:
+
+| Node | Pattern | Responsibility |
+|------|---------|----------------|
+| `parse_input` | Router | Dispatches the input to the correct parser based on file type, normalizes everything to plain text |
+| `segment_content` | Segmenter | Splits the text into logical sections (numbered headings, ALL-CAPS, Markdown, Article/Section/Chapter patterns); falls back to paragraph-boundary chunking when sections exceed `max_chars` |
+| `orchestrate_extraction` | Orchestrator | Fans out one async LLM worker per segment via `asyncio.gather`; emits a progress event each time a worker completes |
+| `finalize_rules` | Synthesizer | Deduplicates candidates by normalized title, assigns sequential `rule_NNN` IDs, and packages the final list into the `finalization_complete` SSE event |
+
+> The diagram above is a conceptual view. The auto-generated LangGraph diagram (via `pipeline._graph.get_graph().draw_mermaid()`) shows the four nodes only — the per-segment workers exist *inside* `orchestrate_extraction` as `asyncio` tasks rather than as separate graph nodes.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm

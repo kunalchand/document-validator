@@ -201,10 +201,12 @@ MUI `Snackbar` in `Phase1.jsx` at the container level — persists across step t
 | Network / fetch error | error | Error message from the thrown exception |
 
 ### Layout — Single Card Surface
-`ExtractionProgress` lives inside the `<Paper>` card for all steps:
-- **Before extraction**: card shows the upload form only (no events yet)
-- **During extraction**: progress bar at the top of the card; upload form hidden while loading
+`ExtractionProgress` lives inside the `<Paper>` card for steps 0 and 1 only (hidden on step 2):
+- **Before extraction (step 0)**: card shows the upload form only (no events yet)
+- **During extraction (step 0)**: progress bar at the top of the card; upload form hidden while loading
 - **Step 1 (review)**: collapsed "Extraction Complete" summary at top of card; header text and rules list below
+- **Step 2 (ready)**: progress bar hidden — clean forward-focused screen
+- **Error recovery**: on network error or SSE error event, `extractionEvents` array is cleared so the progress bar disappears and the page resets to the upload form with an inline error alert and snackbar notification
 - **"Upload New Document"**: clears `extractionEvents`, `extractionError`, and rules — card returns to clean upload state
 
 ### Routing
@@ -378,6 +380,7 @@ LangGraph `StateGraph` with four nodes and two execution modes:
 **Error observability**:
 - `_worker_extract` uses `logger.exception()` — full traceback written to log file on any LLM or parse failure
 - `_orchestrate_extraction` counts failed workers and includes the count in `extraction_complete` event data (`failed_segments` field) and in the event message
+- `_emit()` logs every SSE event at DEBUG level: `[SSE] event_type | stage | message` — enable with `LOG_LEVEL=DEBUG`
 
 **Event emission**: `_emit()` calls `asyncio.Queue.put_nowait()` — non-blocking, safe from both sync and async nodes
 
@@ -429,9 +432,10 @@ const reader = response.body.getReader()
   - Handles streaming response by reading chunks, splitting on newlines, and parsing `data: ` lines as JSON events
   - Calls `onEvent` callback for each event, allowing real-time UI updates without accumulating in memory
 - `ExtractionProgress` component is driven entirely by an `events` prop — no internal fetching
-- `ExtractionProgress` lives inside the `<Paper>` card for all steps — single card surface; no blank card during loading
+- `ExtractionProgress` lives inside the `<Paper>` card for steps 0 and 1 only (hidden on step 2) — single card surface; no blank card during loading
 - SSE event schema is defined in both Python (Pydantic) and TypeScript (interfaces) to keep the contract explicit and type-safe on both ends
 - Phase1 component manages extraction state (`extractionEvents`, `extractionError`) and automatically transitions to review step when `finalization_complete` event arrives with `extracted_rules`
+- **Error recovery**: on network error or SSE error event, `extractionEvents` is cleared so the progress bar disappears and the page resets to the upload form with an inline error alert above the form and a snackbar notification for immediate attention
 - Partial failures (some segments failed, but extraction completed) surface as a MUI Snackbar warning rather than a fatal error — user is informed but can still review the partial results
 - No demo/simulator code in production — all data flows from the real backend
 

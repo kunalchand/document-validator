@@ -125,6 +125,11 @@ The backend writes structured logs to both the terminal and a rotating log file.
 tail -f backend/logs/app.log
 ```
 
+**What gets logged**:
+- Worker failures (LLM timeouts, JSON parse errors) with full tracebacks
+- All SSE events in real-time (when `LOG_LEVEL=DEBUG`)
+- Pipeline stage transitions and metrics (segments found, rules extracted, deduplication, etc.)
+
 Configure in `backend/.env`:
 
 ```env
@@ -132,7 +137,14 @@ LOG_LEVEL=INFO              # DEBUG | INFO | WARNING | ERROR
 LOG_FILE=logs/app.log       # relative to backend/; set empty to disable file logging
 ```
 
-Worker failures (e.g. LLM timeouts, JSON parse errors) are logged with full tracebacks. If extraction completes but some sections failed, a warning toast appears in the UI directing you to the log file for details.
+Enable `LOG_LEVEL=DEBUG` to see SSE events logged as they stream:
+```
+[SSE] parsing_complete | parsing | Document parsed: 12,450 characters
+[SSE] segmentation_complete | segmentation | Found 5 logical sections
+[SSE] extraction_progress | extraction | Processed "Section 1"
+```
+
+If extraction completes but some sections failed, a warning toast appears in the UI directing you to the log file for details.
 
 ## UI Flow
 
@@ -141,7 +153,9 @@ The frontend is a three-step flow inside a single card:
 1. **Upload** — drag-and-drop or paste your rules document; click "Extract Rules"
 2. **Live progress** — the card shows real-time extraction milestones as the pipeline runs; a warning toast appears if any sections fail
 3. **Review & Confirm** — the card transitions to show a collapsed "Extraction Complete" summary (expand it for the full event log) above the extracted rules list; edit, delete, or add rules before confirming
-4. **Ready for Audit** — confirmation screen; Phase 2 audit coming soon
+4. **Ready for Audit** — confirmation screen (extraction progress hidden); Phase 2 audit coming soon
+
+**Error handling**: If a network error or backend failure occurs during extraction, the progress bar clears and the page resets to step 1 with an inline error alert above the form and a snackbar notification.
 
 ## Supported Input Formats
 

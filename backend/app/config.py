@@ -8,9 +8,13 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
+    # LLM provider: dummy | anthropic | grok | ollama
     llm_provider: str = "dummy"
     llm_api_key: Optional[str] = None
     llm_model: str = "dummy-model"
+
+    # Ollama-specific — only used when llm_provider=ollama
+    ollama_host: str = "http://localhost:11434"
 
     embedding_provider: str = "dummy"
     embedding_api_key: Optional[str] = None

@@ -21,7 +21,7 @@ def _get_pipeline(settings: Settings) -> Phase1Pipeline:
     provider = ProviderFactory.create_llm_provider(
         provider_type=settings.llm_provider,
         api_key=settings.llm_api_key or "",
-        config={"model": settings.llm_model},
+        config={"model": settings.llm_model, "host": settings.ollama_host},
     )
     return Phase1Pipeline(llm_provider=provider)
 

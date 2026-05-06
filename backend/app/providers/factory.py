@@ -4,6 +4,9 @@ from enum import Enum
 from app.core import get_logger
 from app.providers.base import LLMProvider, EmbeddingProvider
 from app.providers.dummy_provider import DummyLLMProvider, DummyEmbeddingProvider
+from app.providers.anthropic_provider import AnthropicLLMProvider
+from app.providers.grok_provider import GrokLLMProvider
+from app.providers.ollama_provider import OllamaLLMProvider
 
 logger = get_logger(__name__)
 
@@ -11,10 +14,11 @@ logger = get_logger(__name__)
 class ProviderType(str, Enum):
     """Supported LLM provider types"""
     DUMMY = "dummy"
-    OPENAI = "openai"
     ANTHROPIC = "anthropic"
-    GOOGLE = "google"
     GROK = "grok"
+    OLLAMA = "ollama"
+    OPENAI = "openai"   # reserved for future use
+    GOOGLE = "google"   # reserved for future use
 
 
 class ProviderFactory:
@@ -25,17 +29,14 @@ class ProviderFactory:
 
     _llm_providers = {
         ProviderType.DUMMY: DummyLLMProvider,
-        # TODO: Add concrete implementations
-        # ProviderType.OPENAI: OpenAILLMProvider,
-        # ProviderType.ANTHROPIC: AnthropicLLMProvider,
-        # ProviderType.GOOGLE: GoogleLLMProvider,
+        ProviderType.ANTHROPIC: AnthropicLLMProvider,
+        ProviderType.GROK: GrokLLMProvider,
+        ProviderType.OLLAMA: OllamaLLMProvider,
     }
 
     _embedding_providers = {
         ProviderType.DUMMY: DummyEmbeddingProvider,
-        # TODO: Add concrete implementations
-        # ProviderType.OPENAI: OpenAIEmbeddingProvider,
-        # ProviderType.GOOGLE: GoogleEmbeddingProvider,
+        # Embedding providers for Anthropic/Grok/Ollama added in Phase 2
     }
 
     @classmethod

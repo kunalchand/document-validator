@@ -2,6 +2,9 @@ from app.providers.base import LLMProvider, EmbeddingProvider
 from app.providers.schemas import LLMRequest, LLMResponse, EmbeddingRequest, EmbeddingResponse
 from app.providers.factory import ProviderFactory, ProviderType
 from app.providers.dummy_provider import DummyLLMProvider, DummyEmbeddingProvider
+from app.providers.anthropic_provider import AnthropicLLMProvider
+from app.providers.grok_provider import GrokLLMProvider
+from app.providers.ollama_provider import OllamaLLMProvider
 
 __all__ = [
     "LLMProvider",
@@ -14,4 +17,7 @@ __all__ = [
     "ProviderType",
     "DummyLLMProvider",
     "DummyEmbeddingProvider",
+    "AnthropicLLMProvider",
+    "GrokLLMProvider",
+    "OllamaLLMProvider",
 ]

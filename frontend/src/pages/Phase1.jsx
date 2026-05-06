@@ -127,7 +127,7 @@ export const Phase1 = () => {
       </Stepper>
 
       <Paper elevation={2} sx={{ p: 4 }}>
-        {extractionEvents.length > 0 && (
+        {extractionEvents.length > 0 && activeStep < 2 && (
           <Box sx={{ mb: activeStep === 0 && !extractionError ? 0 : 3 }}>
             <ExtractionProgress events={extractionEvents} />
           </Box>

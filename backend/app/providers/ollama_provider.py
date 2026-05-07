@@ -64,3 +64,7 @@ class OllamaLLMProvider(LLMProvider):
     @property
     def provider_name(self) -> str:
         return "ollama"
+
+    @property
+    def max_concurrency(self) -> int:
+        return 1

@@ -49,10 +49,9 @@ const ExtractionProgress = ({ events = [] }) => {
                      currentEvent?.event_type === 'finalization_complete';
   const isError = currentEvent?.event_type === 'error';
 
-  // Calculate overall progress
+  // Stage sequence
   const stageSequence = ['parsing', 'segmentation', 'extraction', 'finalization'];
   const currentStageIndex = stageSequence.indexOf(currentStage);
-  const overallPercent = Math.round(((currentStageIndex + 1) / stageSequence.length) * 100);
 
   // Get metrics from latest events
   const parsingEvent = events.find(e => e.event_type === 'parsing_complete');
@@ -69,6 +68,52 @@ const ExtractionProgress = ({ events = [] }) => {
   const rulesFoundSoFar = latestExtractionEvent?.data?.total_rules_so_far;
   const totalRules = finalEvent?.data?.total_rules;
   const uniqueRules = finalEvent?.data?.unique_rules;
+
+  // Granular progress bar value
+  // Stages are mapped to ranges so the bar moves continuously during extraction:
+  //   parsing 0–10%, segmentation 10–20%, extraction 20–90%, finalization 90–100%
+  const segmentPercent = latestExtractionEvent?.progress?.percent ?? null;
+  let effectivePercent;
+  if (isError) {
+    effectivePercent = 0;
+  } else if (isComplete) {
+    effectivePercent = 100;
+  } else if (currentStage === 'extraction' && segmentPercent != null) {
+    effectivePercent = Math.round(20 + segmentPercent * 0.7);
+  } else {
+    const stageFloor = { parsing: 5, segmentation: 15, extraction: 20, finalization: 92 };
+    effectivePercent = stageFloor[currentStage] ?? 0;
+  }
+
+  // ETA — only shown during active extraction once at least one segment has completed
+  const extractionStartEvent = events.find(e => e.event_type === 'extraction_started');
+  const completedSegmentEvents = extractionEvents.filter(e => e.data?.rules_in_segment != null);
+  let etaText = null;
+  if (
+    currentStage === 'extraction' &&
+    !isComplete &&
+    completedSegmentEvents.length > 0 &&
+    extractionStartEvent?.timestamp
+  ) {
+    const lastCompleted = completedSegmentEvents[completedSegmentEvents.length - 1];
+    const doneCount = lastCompleted.progress?.current ?? completedSegmentEvents.length;
+    const totalCount = lastCompleted.progress?.total ?? totalSegments ?? 1;
+    const remaining = totalCount - doneCount;
+
+    if (remaining > 0 && doneCount > 0 && lastCompleted.timestamp) {
+      const elapsedMs = new Date(lastCompleted.timestamp) - new Date(extractionStartEvent.timestamp);
+      const avgMs = elapsedMs / doneCount;
+      const etaMs = Math.round(avgMs * remaining);
+
+      if (etaMs < 60000) {
+        etaText = `~${Math.ceil(etaMs / 1000)}s remaining`;
+      } else {
+        const mins = Math.floor(etaMs / 60000);
+        const secs = Math.round((etaMs % 60000) / 1000);
+        etaText = secs > 0 ? `~${mins}m ${secs}s remaining` : `~${mins}m remaining`;
+      }
+    }
+  }
 
   const getStageIcon = (stage) => {
     const stageIdx = stageSequence.indexOf(stage);
@@ -119,12 +164,13 @@ const ExtractionProgress = ({ events = [] }) => {
               </Typography>
             </Box>
 
-            {/* Overall Progress Bar */}
-            <Box sx={{ marginY: 1 }}>
+            {/* Progress Bar with percentage label */}
+            <Box sx={{ marginY: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
               <LinearProgress
                 variant="determinate"
-                value={isError ? 0 : Math.min(overallPercent, 100)}
+                value={Math.min(effectivePercent, 100)}
                 sx={{
+                  flex: 1,
                   height: 8,
                   borderRadius: 4,
                   backgroundColor: isError ? '#FFCDD2' : '#E0E0E0',
@@ -134,6 +180,12 @@ const ExtractionProgress = ({ events = [] }) => {
                   },
                 }}
               />
+              <Typography
+                variant="caption"
+                sx={{ minWidth: 36, textAlign: 'right', fontWeight: 600, color: isError ? '#F44336' : STAGE_COLORS[currentStage] }}
+              >
+                {effectivePercent}%
+              </Typography>
             </Box>
 
             {/* Status Text */}
@@ -143,12 +195,25 @@ const ExtractionProgress = ({ events = [] }) => {
                 : currentEvent?.message || 'Ready to process...'}
             </Typography>
 
-            {/* Segment Progress for Extraction Stage */}
+            {/* Segment Progress + ETA for Extraction Stage */}
             {currentStage === 'extraction' && totalSegments && (
-              <Typography variant="caption" sx={{ display: 'block', marginTop: 0.5, color: '#666' }}>
-                Segment {currentSegment} of {totalSegments}
-                {rulesFoundSoFar && ` • ${rulesFoundSoFar} rules found so far`}
-              </Typography>
+              <Box sx={{ marginTop: 0.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <Typography variant="caption" sx={{ color: '#444', fontWeight: 600 }}>
+                    Segment {currentSegment} of {totalSegments}
+                  </Typography>
+                  {etaText && (
+                    <Typography variant="caption" sx={{ color: '#444', fontWeight: 600 }}>
+                      {etaText}
+                    </Typography>
+                  )}
+                </Box>
+                {rulesFoundSoFar != null && (
+                  <Typography variant="caption" sx={{ display: 'block', color: '#888' }}>
+                    {rulesFoundSoFar} rules found so far
+                  </Typography>
+                )}
+              </Box>
             )}
           </Box>
 
@@ -199,7 +264,7 @@ const ExtractionProgress = ({ events = [] }) => {
                 </Grid>
               )}
 
-              {rulesFoundSoFar && (
+              {rulesFoundSoFar != null && (
                 <Grid item xs={12} sm={6}>
                   <Paper sx={{ padding: 1.5, backgroundColor: '#F9F9F9' }}>
                     <Typography variant="caption" color="textSecondary">
@@ -212,7 +277,7 @@ const ExtractionProgress = ({ events = [] }) => {
                 </Grid>
               )}
 
-              {uniqueRules && (
+              {uniqueRules != null && (
                 <Grid item xs={12} sm={6}>
                   <Paper sx={{ padding: 1.5, backgroundColor: '#F9F9F9' }}>
                     <Typography variant="caption" color="textSecondary">

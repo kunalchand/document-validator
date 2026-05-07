@@ -164,7 +164,10 @@ class Phase1Pipeline:
             logger.warning("No segments to process — returning empty candidates")
             return {"rule_candidates": []}
 
-        logger.info(f"Dispatching {total} segment workers")
+        max_concurrency = self._llm.max_concurrency
+        semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency > 0 else None
+        mode = f"serial (max_concurrency={max_concurrency})" if semaphore else "parallel"
+        logger.info(f"Dispatching {total} segment workers [{mode}]")
 
         self._emit(ExtractionEvent(
             event_type=ExtractionEventType.extraction_started,
@@ -173,8 +176,6 @@ class Phase1Pipeline:
             progress=ExtractionProgress(current=0, total=total, percent=0),
         ))
 
-        # Track progress across concurrent workers (asyncio is single-threaded,
-        # but lock avoids any ordering issues when multiple workers complete close together)
         completed = 0
         total_candidates_so_far = 0
         progress_lock = asyncio.Lock()
@@ -183,42 +184,61 @@ class Phase1Pipeline:
             nonlocal completed, total_candidates_so_far
             segment_label = segment.title or f"Section {segment.index + 1}"
 
-            # Emit "processing started" event before worker begins
-            self._emit(ExtractionEvent(
-                event_type=ExtractionEventType.extraction_progress,
-                stage=ExtractionStage.extraction,
-                message=f'Processing "{segment_label}"...',
-                data=ExtractionEventData(
-                    segment_index=segment.index,
-                    segment_title=segment_label,
-                ),
-            ))
+            async def _run() -> list[RuleCandidate]:
+                nonlocal completed, total_candidates_so_far
 
-            candidates = await self._worker_extract(segment)
-
-            async with progress_lock:
-                completed += 1
-                total_candidates_so_far += len(candidates)
-
-                # Emit "processing complete" event with results
+                logger.info(f'Worker [{segment.index + 1}/{total}] starting: "{segment_label}"')
                 self._emit(ExtractionEvent(
                     event_type=ExtractionEventType.extraction_progress,
                     stage=ExtractionStage.extraction,
-                    message=f'Processed "{segment_label}" → {len(candidates)} rules extracted',
+                    message=f'Processing "{segment_label}"...',
                     progress=ExtractionProgress(
-                        current=completed,
+                        current=completed + 1,
                         total=total,
-                        percent=round(completed / total * 100),
+                        percent=round((completed + 1) / total * 100),
                     ),
                     data=ExtractionEventData(
                         segment_index=segment.index,
                         segment_title=segment_label,
-                        rules_in_segment=len(candidates),
                         total_rules_so_far=total_candidates_so_far,
                     ),
                 ))
 
-            return candidates
+                candidates = await self._worker_extract(segment)
+
+                async with progress_lock:
+                    completed += 1
+                    total_candidates_so_far += len(candidates)
+
+                    logger.info(
+                        f'Worker [{segment.index + 1}/{total}] done: "{segment_label}" → '
+                        f'{len(candidates)} rules extracted ({completed}/{total} complete, '
+                        f'{total_candidates_so_far} total so far)'
+                    )
+                    self._emit(ExtractionEvent(
+                        event_type=ExtractionEventType.extraction_progress,
+                        stage=ExtractionStage.extraction,
+                        message=f'Processed "{segment_label}" → {len(candidates)} rules extracted',
+                        progress=ExtractionProgress(
+                            current=completed,
+                            total=total,
+                            percent=round(completed / total * 100),
+                        ),
+                        data=ExtractionEventData(
+                            segment_index=segment.index,
+                            segment_title=segment_label,
+                            rules_in_segment=len(candidates),
+                            total_rules_so_far=total_candidates_so_far,
+                        ),
+                    ))
+
+                return candidates
+
+            if semaphore is not None:
+                async with semaphore:
+                    return await _run()
+            else:
+                return await _run()
 
         tasks = [worker_with_emit(seg) for seg in segments]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -267,7 +287,7 @@ class Phase1Pipeline:
             )
             response = await self._llm.generate(request)
             candidates = parse_llm_response(response.content, segment.index)
-            logger.debug(f"Segment {segment.index}: {len(candidates)} candidates extracted")
+            logger.info(f"LLM response: segment {segment.index} ({segment.char_count} chars) → {len(candidates)} candidates")
             return candidates
         except Exception:
             logger.exception(f"Worker failed for segment {segment.index} ({segment.title!r})")

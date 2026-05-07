@@ -32,6 +32,16 @@ class LLMProvider(ABC):
         """Provider identifier (e.g., 'anthropic', 'grok', 'ollama'). Used in LLMResponse metadata."""
         pass
 
+    @property
+    def max_concurrency(self) -> int:
+        """
+        Max number of simultaneous LLM requests the pipeline should issue.
+        0 = unlimited (default for cloud providers).
+        1 = serial (one at a time — correct for local Ollama which queues requests anyway).
+        Override in concrete providers where the server can't truly parallelize.
+        """
+        return 0
+
 
 class EmbeddingProvider(ABC):
     """

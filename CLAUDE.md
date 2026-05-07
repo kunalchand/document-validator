@@ -178,16 +178,20 @@ Dual-mode SSE progress display — live during extraction, persistent log after 
 
 **Features**:
 - Receives `events` prop — array of `ExtractionEvent` objects from backend SSE stream
-- Collapsible card with current stage name and overall progress bar
-- Segment-level progress text (e.g., "Segment 3 of 7 • 12 rules found so far")
+- Collapsible card with current stage name, progress bar with percentage label, and segment-level info
+- **Granular progress bar**: stages mapped to specific ranges so the bar moves continuously — parsing 0–10%, segmentation 10–20%, extraction 20–90% (tracking actual segment completion %), finalization 90–100%; percentage label shown right-aligned in the stage color
+- **Segment info row** (during extraction): two-line layout
+  - Row 1: "Segment X of Y" (bold, left) + ETA (bold, right, e.g. "~4m 20s remaining")
+  - Row 2: "N rules found so far" (lighter caption)
+  - ETA only appears after the first segment completes, giving a real timing estimate; updates with each segment
 - Color-coded stages: parsing (blue) / segmentation (orange) / extraction (purple) / finalization (green)
 - Animated spinning icon for the active stage, checkmark for all completed stages
 - When `isComplete`: all four stages show the checkmark (finalization stage no longer stuck on "active")
 - **Expandable details panel** shows:
-  - Key metrics grid (document size, sections found, rules found/unique)
+  - Key metrics grid (document size, sections found, rules found/unique) — uses `!= null` guards so "0" renders correctly instead of as a bare text node
   - Section titles identified (as chips)
   - Processing timeline showing all four stages with status badges
-  - Full event log with timestamps (auto-scrolls to latest entry)
+  - Full event log with timestamps
 - Error state: red border, warning icon, error message
 - Starts collapsed by default — useful on step 1 where it acts as an audit trail
 
@@ -215,10 +219,10 @@ React Router v6 with a single production route:
 
 ### Component Architecture
 - **DocumentUploadForm**: Reusable component accepting `phase` prop for multi-phase support
-- **RuleCard**: Editable rule with expand/collapse for conditions and evidence
+- **RuleCard**: Editable rule with expand/collapse for conditions and evidence; all fields (`description`, `section`, `conditions`, `expected_evidence`) display "N/A" when null or empty rather than rendering blank
 - **RulesList**: Stateful list with search, filter, and CRUD operations
 - **ConfirmationDialog**: Reusable modal for destructive actions
-- **ExtractionProgress**: Live + completed SSE event display with collapsible details; driven entirely by `events` prop
+- **ExtractionProgress**: Live + completed SSE event display with collapsible details; driven entirely by `events` prop; includes granular progress bar, percentage label, and ETA calculation
 - Material UI theme applied globally via `ThemeProvider`
 
 ### Services & Utilities
@@ -268,7 +272,7 @@ npm run build            # Production build
 
 **Core Components**:
 1. **Configuration** (`config.py`): Pydantic BaseSettings, LRU-cached singleton; defaults to `ollama` + `llama2`; includes `log_file` setting
-2. **Logging** (`core/logger.py`): `configure_logging(log_level, log_file)` sets up the root logger once at startup with a console `StreamHandler` and a `RotatingFileHandler` (10 MB per file, 5 backups). `get_logger(name)` returns named child loggers that inherit both handlers. Called from `main.py` before any logger is created.
+2. **Logging** (`core/logger.py`): `configure_logging(log_level, log_file)` sets up the root logger once at startup with a console `StreamHandler` and a `RotatingFileHandler` (10 MB per file, 5 backups). `get_logger(name)` returns named child loggers that inherit both handlers. Called from `main.py` before any logger is created. **Important**: also explicitly sets `logging.getLogger("app").setLevel(level)` so uvicorn's internal `logging.config.dictConfig()` call (which resets root to INFO) cannot override the configured level for our app loggers. Also suppresses `httpx` to `WARNING` to silence per-request HTTP logs from the Ollama provider.
 3. **Exceptions** (`core/exceptions.py`): `InvalidInputException` (400), `FileParseFailed` (422), `ExtractionFailed` (500), `AuditFailed` (500)
 4. **Validation** (`utils/validators.py`): `validate_file()`, `validate_text()`
 
@@ -296,14 +300,20 @@ Access Swagger at `http://localhost:8000/docs`
 class LLMProvider(ABC):
     async def generate(self, request: LLMRequest) -> LLMResponse: ...
     def provider_name(self) -> str: ...          # property
+    def max_concurrency(self) -> int: ...        # property; default 0 = unlimited
 ```
 
+`max_concurrency` controls how many simultaneous LLM requests the orchestrator issues:
+- `0` (default) — unlimited, all segments dispatched in parallel via `asyncio.gather` (correct for cloud APIs)
+- `1` — serial, one segment at a time via `asyncio.Semaphore(1)` (correct for local Ollama which queues requests server-side anyway)
+- Override in concrete providers; add any value in between for providers with known rate limits
+
 **Implemented LLM Providers**:
-| Provider | File | Auth | Default Model |
-|----------|------|------|---------------|
-| Ollama (local) | `ollama_provider.py` | None — no API key needed | `llama2` |
-| Anthropic (Claude) | `anthropic_provider.py` | `LLM_API_KEY=sk-ant-...` | `claude-haiku-4-5-20251001` |
-| Grok (xAI) | `grok_provider.py` | `LLM_API_KEY=xai-...` | `grok-3-mini` |
+| Provider | File | Auth | Default Model | max_concurrency |
+|----------|------|------|---------------|-----------------|
+| Ollama (local) | `ollama_provider.py` | None — no API key needed | `llama2` | 1 (serial) |
+| Anthropic (Claude) | `anthropic_provider.py` | `LLM_API_KEY=sk-ant-...` | `claude-haiku-4-5-20251001` | 0 (parallel) |
+| Grok (xAI) | `grok_provider.py` | `LLM_API_KEY=xai-...` | `grok-3-mini` | 0 (parallel) |
 
 **Embedding**: `DummyEmbeddingProvider` in `dummy_provider.py` — placeholder only; real embedding providers added in Phase 2.
 
@@ -374,14 +384,15 @@ LangGraph `StateGraph` with four nodes and two execution modes:
 **Nodes**:
 - `parse_input`: Routes to the correct parser; emits `parsing_started`, `parsing_complete`
 - `segment_content`: Calls `segment_text()`; emits `segmentation_started`, `segmentation_complete` (with section count and titles)
-- `orchestrate_extraction`: Dispatches `asyncio.gather` fan-out of worker tasks; emits `extraction_started`, one `extraction_progress` per segment (with `asyncio.Lock` for safe concurrent counter), `extraction_complete` — the `extraction_complete` event includes `failed_segments` count so the frontend can warn the user if any workers failed
+- `orchestrate_extraction`: Reads `self._llm.max_concurrency` to decide parallel vs serial dispatch. If `max_concurrency > 0`, wraps each worker in `asyncio.Semaphore(max_concurrency)` so only N workers run at once; otherwise all workers are dispatched concurrently via `asyncio.gather`. Emits `extraction_started`, two `extraction_progress` events per segment ("Processing..." with full `progress` field before the LLM call, "Processed..." after), `extraction_complete`. Uses `asyncio.Lock` for safe concurrent counter updates. Logs worker start/done at INFO level.
 - `finalize_rules`: Deduplicates, assigns `rule_NNN` IDs; emits `finalization_started`, `finalization_complete` (with full `extracted_rules` list in event data)
 
 **Error observability**:
 - `_worker_extract` uses `logger.exception()` — full traceback written to log file on any LLM or parse failure
 - `_orchestrate_extraction` counts failed workers and includes the count in `extraction_complete` event data (`failed_segments` field) and in the event message
 - `_emit()` logs every SSE event at DEBUG level: `[SSE] event_type | stage | message` — enable with `LOG_LEVEL=DEBUG`
-- Per-segment extraction shows two events: "Processing 'Section X'..." at start, then "Processed 'Section X' → N rules extracted" on completion, enabling timing visibility
+- Per-segment extraction shows two INFO-level log lines per worker regardless of `LOG_LEVEL`: `Worker [N/total] starting: "Section X"` and `Worker [N/total] done: "Section X" → M rules extracted (N/total complete, T total so far)`
+- Both "Processing" and "Processed" `extraction_progress` events carry a full `progress` field (`current`, `total`, `percent`) so the frontend always has segment metrics even during the LLM call
 
 **Event emission**: `_emit()` calls `asyncio.Queue.put_nowait()` — non-blocking, safe from both sync and async nodes
 
@@ -417,15 +428,15 @@ const reader = response.body.getReader()
 **Backend**:
 - Rules extraction is a deterministic structuring problem — no vector DB in Phase 1
 - Vector DB is used only for the user document in Phase 2
-- Map-reduce (fan-out / fan-in) with `asyncio.gather` for parallel per-segment LLM calls
+- Map-reduce (fan-out / fan-in) with `asyncio.gather` for parallel per-segment LLM calls; serialized via `asyncio.Semaphore` for providers that declare `max_concurrency=1` (Ollama)
 - Stateless between API calls — rules are passed explicitly by the client
 - No LangGraph interrupts or checkpointing in v1 (kept simple intentionally)
 - All three input types (PDF, DOCX, raw text) normalized to plain text before pipeline entry
-- **Provider-agnostic LLM interface** — async-only (`generate`), no sync/batch variants; concurrency handled by `asyncio.gather` at the pipeline level
+- **Provider-agnostic LLM interface** — async-only (`generate`), no sync/batch variants; concurrency controlled per-provider via `max_concurrency` property (`0` = unlimited for cloud, `1` = serial for local Ollama)
 - **Two endpoint modes**: `/extract-rules` (sync JSON) and `/extract-rules-stream` (SSE) — same pipeline, different execution paths (`run()` vs `stream()`)
 - **Circular import prevention**: pipeline layer (`app/pipeline/`) never imports from API layer (`app/api/`); pipeline returns `list[dict]`, API layer owns Pydantic conversion
 - `sse-starlette==1.6.5` pinned for compatibility with FastAPI 0.104.1 (starlette<0.28, anyio<4)
-- **Logging**: `configure_logging()` called once at app startup; root logger gets both console and rotating file handler; all module loggers inherit via standard Python logging hierarchy
+- **Logging**: `configure_logging()` called once at app startup; root logger gets both console and rotating file handler; `app` package logger level explicitly pinned so uvicorn's `dictConfig` cannot reset it; `httpx` suppressed to WARNING to avoid noisy per-request logs
 
 **Frontend**:
 - **SSE Integration** (`documentService.extractRulesStream()`):

@@ -127,7 +127,15 @@ tail -f backend/logs/app.log
 
 **What gets logged**:
 - Worker failures (LLM timeouts, JSON parse errors) with full tracebacks
-- All SSE events in real-time (when `LOG_LEVEL=DEBUG`), including per-segment processing start/completion
+- Per-segment worker start and completion at INFO level — visible without enabling DEBUG:
+  ```
+  Worker [1/26] starting: "Section 1 - Data Handling"
+  LLM response: segment 0 (2,847 chars) → 3 candidates
+  Worker [1/26] done: "Section 1 - Data Handling" → 3 rules extracted (1/26 complete, 3 total so far)
+  Worker [2/26] starting: "Section 2 - Access Control"
+  ...
+  ```
+- All SSE events in real-time (when `LOG_LEVEL=DEBUG`): `[SSE] event_type | stage | message`
 - Pipeline stage transitions and metrics (segments found, rules extracted, deduplication, etc.)
 
 Configure in `backend/.env`:
@@ -137,15 +145,7 @@ LOG_LEVEL=INFO              # DEBUG | INFO | WARNING | ERROR
 LOG_FILE=logs/app.log       # relative to backend/; set empty to disable file logging
 ```
 
-Enable `LOG_LEVEL=DEBUG` to see SSE events logged as they stream:
-```
-[SSE] parsing_complete | parsing | Document parsed: 12,450 characters
-[SSE] segmentation_complete | segmentation | Found 5 logical sections
-[SSE] extraction_progress | extraction | Processing "Section 1"...
-[SSE] extraction_progress | extraction | Processed "Section 1" → 2 rules extracted
-[SSE] extraction_progress | extraction | Processing "Section 2"...
-[SSE] extraction_progress | extraction | Processed "Section 2" → 3 rules extracted
-```
+**Note**: `LOG_LEVEL=DEBUG` correctly propagates to all `app.*` loggers even when running under uvicorn. The `app` package logger level is explicitly pinned at startup so uvicorn's internal logging config cannot reset it.
 
 If extraction completes but some sections failed, a warning toast appears in the UI directing you to the log file for details.
 
@@ -154,8 +154,11 @@ If extraction completes but some sections failed, a warning toast appears in the
 The frontend is a three-step flow inside a single card:
 
 1. **Upload** — drag-and-drop or paste your rules document; click "Extract Rules"
-2. **Live progress** — the card shows real-time extraction milestones as the pipeline runs; a warning toast appears if any sections fail
-3. **Review & Confirm** — the card transitions to show a collapsed "Extraction Complete" summary (expand it for the full event log) above the extracted rules list; edit, delete, or add rules before confirming
+2. **Live progress** — the card shows real-time extraction milestones as the pipeline runs:
+   - Progress bar with percentage label; bar fills continuously (not stage-based jumps) — parsing 0–10%, segmentation 10–20%, extraction 20–90% tracking actual segment completion, finalization 90–100%
+   - "Segment X of Y" (left) and "~Nm Xs remaining" ETA (right) on the first line; "N rules found so far" on the second line — ETA appears after the first segment completes and updates with each one
+   - A warning toast appears if any sections fail
+3. **Review & Confirm** — the card transitions to show a collapsed "Extraction Complete" summary (expand it for the full event log) above the extracted rules list; edit, delete, or add rules before confirming; rule fields that the LLM left blank display "N/A"
 4. **Ready for Audit** — confirmation screen (extraction progress hidden); Phase 2 audit coming soon
 
 **Error handling**: If a network error or backend failure occurs during extraction, the progress bar clears and the page resets to step 1 with an inline error alert above the form and a snackbar notification.
